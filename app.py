@@ -106,7 +106,7 @@ def phan_tich_tai_lieu_ai(file_tai_len, key):
         noi_dung_input = [f"Nội dung tài liệu:\n{text[:10000]}\n\n{prompt}"]
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=noi_dung_input,
         config=types.GenerateContentConfig(
             response_mime_type="application/json"
