@@ -88,7 +88,8 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
 def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
-prompt = """
+
+    prompt = """
     Bạn là một chuyên gia sư phạm. Hãy đọc tài liệu được cung cấp và biên soạn một bài giảng PowerPoint chi tiết.
     Yêu cầu bắt buộc:
     - Phân tích sâu và diễn đạt lại nội dung bằng ngôn ngữ giảng dạy của riêng bạn (KHÔNG sao chép y nguyên từng chữ của tài liệu gốc để tránh lỗi bản quyền).
@@ -112,8 +113,8 @@ prompt = """
         ]
     }
     """
-    
-if ten_file.endswith(".pdf"):
+
+    if ten_file.endswith(".pdf"):
         noi_dung_input = [{"mime_type": "application/pdf", "data": file_bytes}, prompt]
     elif ten_file.endswith(".docx"):
         doc = docx.Document(io.BytesIO(file_bytes))
