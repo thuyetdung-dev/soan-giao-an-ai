@@ -512,24 +512,32 @@ if st.button("🚀 Phân tích và tạo PowerPoint", type="primary", use_contai
                               int(slide_count), theme_name, include_answers, include_notes)
         source_text, source_bytes, source_type = read_source(uploaded)
         client = genai.Client(api_key=api_key)
+        
         with st.status("Đang soạn bài giảng…", expanded=True) as status:
             st.write("Đang đọc và cấu trúc hóa tài liệu nguồn…")
-            lesson_data = generate_lesson(client, "gemini-2.5-flash", source_text, source_bytes, source_type, config)
+            # Chỉ định đích danh mô hình Flash chuẩn xác với khóa API của thầy
+            lesson_data = generate_lesson(client, "gemini-1.5-flash", source_text, source_bytes, source_type, config)
+            
             st.write("Đang kiểm tra nội dung và dựng PowerPoint…")
             pptx_bytes = build_pptx(lesson_data, config)
             status.update(label="Đã tạo xong bài giảng", state="complete", expanded=False)
+            
         safe_name = re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+", "_", lesson_data.get("title") or "Bai_giang_Toan").strip("_")
         filename = f"{safe_name[:70]}_{uuid.uuid4().hex[:6]}.pptx"
         st.success(f"Đã tạo {len(lesson_data['slides'])} nội dung slide. Nội dung dài sẽ được tự chia trang khi xuất.")
         st.download_button("📥 Tải PowerPoint", pptx_bytes, filename,
                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                            use_container_width=True)
+                           
         with st.expander("Xem danh mục slide"):
             for i, item in enumerate(lesson_data["slides"], 1):
                 st.write(f"{i}. **{item['title']}** — {item['activity'].title()}")
+                
     except json.JSONDecodeError:
         st.error("AI trả về dữ liệu chưa đúng định dạng. Vui lòng bấm tạo lại.")
     except ValueError as exc:
         st.error(str(exc))
-    except Exception:
+    except Exception as e:
+        # Bắt và hiển thị lỗi chi tiết để dễ kiểm tra
+        st.error(f"Lỗi hệ thống chi tiết: {str(e)}")
         st.error("Không thể hoàn tất bài giảng. Hãy kiểm tra tài liệu, khóa API và thử lại.")
