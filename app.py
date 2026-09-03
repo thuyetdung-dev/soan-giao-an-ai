@@ -90,16 +90,25 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     ten_file = file_tai_len.name.lower()
 
     prompt = """
-    Bạn là chuyên gia sư phạm. Hãy phân tích tài liệu được cung cấp và thiết kế cấu trúc bài giảng PowerPoint chuẩn mực từ 4 đến 7 slide.
-    Xuất ra DUY NHẤT định dạng JSON thuần (không kèm bất kỳ văn bản giải thích nào khác) theo mẫu sau:
+    Bạn là một chuyên gia sư phạm. Hãy đọc thật kỹ, trích xuất ĐẦY ĐỦ và CHI TIẾT toàn bộ nội dung từ tài liệu được cung cấp để thiết kế một bài giảng PowerPoint hoàn chỉnh.
+    Yêu cầu bắt buộc:
+    - KHÔNG được tóm tắt qua loa hay cắt xén nội dung quan trọng. 
+    - Bài giảng có thể kéo dài từ 10 đến 25 slide tùy vào độ dài và độ sâu của tài liệu gốc.
+    - Mỗi slide cần có các ý diễn giải chi tiết, đầy đủ câu chữ (4-7 ý/slide) để giáo viên có thể trực tiếp giảng dạy.
+    - Xuất ra DUY NHẤT định dạng JSON thuần (không kèm văn bản giải thích nào khác) theo mẫu sau:
     {
-        "tieu_de": "Tên bài học",
+        "tieu_de": "Tên bài học chi tiết",
         "mon": "Môn học",
-        "giao_vien": "Tên giáo viên",
+        "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Tiêu đề Slide",
-                "noi_dung": ["Ý chính 1", "Ý chính 2", "Ý chính 3"]
+                "tieu_de_slide": "Tiêu đề Slide (Rõ ràng, cụ thể)",
+                "noi_dung": [
+                    "Nội dung chi tiết 1 (đầy đủ ý nghĩa)", 
+                    "Nội dung chi tiết 2...", 
+                    "Nội dung chi tiết 3...", 
+                    "Nội dung chi tiết 4..."
+                ]
             }
         ]
     }
