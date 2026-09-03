@@ -41,15 +41,31 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
-# 1. HÀM VẼ ĐỒ THỊ HÀM SỐ
+# 1. BỘ LỌC ĐỊNH DẠNG TOÁN HỌC (MỚI)
+def dinh_dang_toan_hoc(text):
+    if not isinstance(text, str): return text
+    # Xử lý lũy thừa
+    text = text.replace('**2', '²').replace('^2', '²')
+    text = text.replace('**3', '³').replace('^3', '³')
+    text = text.replace('**4', '⁴').replace('^4', '⁴')
+    # Xử lý chỉ số dưới
+    subscripts = {'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', 'i': 'ᵢ'}
+    for k, v in subscripts.items():
+        text = text.replace(f'_{k}', v)
+    # Xử lý ký hiệu logic
+    text = text.replace('<=>', '⇔').replace('=>', '⇒')
+    text = text.replace('>=', '≥').replace('<=', '≤')
+    return text
+
+# 2. HÀM VẼ ĐỒ THỊ HÀM SỐ
 def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
     try:
         fig, ax = plt.subplots(figsize=(6, 4))
         x = np.linspace(x_min, x_max, 400)
         
-        bieu_thuc = bieu_thuc.replace('^', '**')
+        bieu_thuc_ve = bieu_thuc.replace('^', '**')
         safe_dict = {"x": x, "np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt, "abs": np.abs, "exp": np.exp}
-        y = eval(bieu_thuc, {"__builtins__": None}, safe_dict)
+        y = eval(bieu_thuc_ve, {"__builtins__": None}, safe_dict)
         
         ax.plot(x, y, color='blue', lw=2)
         ax.axhline(0, color='black', lw=1.2)
@@ -59,7 +75,7 @@ def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
         y_min, y_max = np.nanmin(y), np.nanmax(y)
         if y_max - y_min > 50: ax.set_ylim(-20, 20)
             
-        ax.set_title(f"Đồ thị: y = {bieu_thuc.replace('**', '^')}", fontsize=12)
+        ax.set_title(f"Đồ thị: y = {dinh_dang_toan_hoc(bieu_thuc)}", fontsize=12)
         
         buf = io.BytesIO()
         plt.savefig(buf, format='png', bbox_inches='tight', dpi=300, transparent=True)
@@ -70,7 +86,7 @@ def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
         plt.close(fig)
         return None
 
-# 2. HÀM VẼ BẢNG BIẾN THIÊN TÍCH HỢP ĐỘNG CƠ SỬA LỖI TOÁN HỌC
+# 3. HÀM VẼ BẢNG BIẾN THIÊN
 def tao_anh_bbt(bbt_data, is_xet_dau=False):
     x_data = bbt_data.get("x", [])
     y_phay_data = bbt_data.get("y_phay", [])
@@ -110,10 +126,8 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
         val_y = str(y_val_data[i]).strip() if i < len(y_val_data) else ""
         
         is_undefined = False
-        if val_yp == "||" or "||" in val_y:
-            is_undefined = True
-        elif "∞" in val_y and " " in val_y and val_yp == "": 
-            is_undefined = True
+        if val_yp == "||" or "||" in val_y: is_undefined = True
+        elif "∞" in val_y and " " in val_y and val_yp == "": is_undefined = True
             
         if is_undefined:
             ax.plot([col_x-0.03, col_x-0.03], [0, rows - 1], color='black', lw=1.2)
@@ -154,7 +168,6 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
             x1, y1 = y_coords[i]
             x2, y2 = y_coords[i+1]
             if abs(x2 - x1) < 0.6: continue
-            
             dx, dy = x2 - x1, y2 - y1
             sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0)
             
@@ -171,7 +184,7 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
     plt.close(fig)
     return buf
 
-# 3. HÀM TẠO POWERPOINT (TÁCH TEXTBOX ĐỂ LÀM HIỆU ỨNG)
+# 4. HÀM TẠO POWERPOINT (TÁCH TEXTBOX CHỐNG ĐÈ CHỮ)
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -181,7 +194,7 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     slide_title = prs.slides.add_slide(blank_layout)
     tx = slide_title.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
     p = tx.text_frame.paragraphs[0]
-    p.text = str(noi_dung_bai_hoc.get("tieu_de", "Bài Giảng Điện Tử"))
+    p.text = dinh_dang_toan_hoc(str(noi_dung_bai_hoc.get("tieu_de", "Bài Giảng Điện Tử")))
     p.font.size = Pt(38)
     p.font.bold = True
     p.font.color.rgb = RGBColor(0, 51, 102)
@@ -198,43 +211,53 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         
         t_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.7), Inches(0.8))
         p_t = t_box.text_frame.paragraphs[0]
-        p_t.text = str(item.get("tieu_de_slide", ""))
+        p_t.text = dinh_dang_toan_hoc(str(item.get("tieu_de_slide", "")))
         p_t.font.size = Pt(28)
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
-        top_pos = Inches(1.3)
+        # Trải từng dòng thành Textbox độc lập, chiều cao động
+        top_pos = Inches(1.2)
         for bullet in item.get("noi_dung", []):
-            c_box = slide.shapes.add_textbox(Inches(0.8), top_pos, Inches(11.7), Inches(0.5))
+            bullet_sach = dinh_dang_toan_hoc(str(bullet))
+            # Thuật toán co giãn: Đếm số lượng ký tự để tính số dòng tương đối
+            so_dong = (len(bullet_sach) // 70) + 1
+            chieu_cao_box = Inches(0.4 * so_dong)
+            
+            c_box = slide.shapes.add_textbox(Inches(0.8), top_pos, Inches(11.7), chieu_cao_box)
             tf_c = c_box.text_frame
             tf_c.word_wrap = True
             
             p_c = tf_c.paragraphs[0]
-            p_c.text = f"• {bullet}"
+            p_c.text = f"• {bullet_sach}"
             p_c.font.size = Pt(22)
             p_c.font.color.rgb = RGBColor(50, 50, 50)
-            top_pos += Inches(0.55)
+            
+            # Cộng dồn tọa độ để dòng tiếp theo không đè lên
+            top_pos += chieu_cao_box + Inches(0.05)
 
+        # Tính toán tọa độ ép giới hạn để hình vẽ không bị văng ra khỏi slide
+        pic_top = min(top_pos, Inches(4.5))
         if "do_thi" in item:
             dt = item["do_thi"]
             buf = tao_anh_do_thi(dt.get("bieu_thuc", "x"), dt.get("x_min", -5), dt.get("x_max", 5))
             if buf:
-                slide.shapes.add_picture(buf, Inches(3.5), top_pos, width=Inches(5.5))
+                slide.shapes.add_picture(buf, Inches(3.5), pic_top, width=Inches(5.5))
                 
         elif "bang_bien_thien" in item:
             buf = tao_anh_bbt(item["bang_bien_thien"], is_xet_dau=False)
             if buf:
-                slide.shapes.add_picture(buf, Inches(2.1), top_pos, width=Inches(9))
+                slide.shapes.add_picture(buf, Inches(2.1), pic_top, width=Inches(9))
                 
         elif "bang_xet_dau" in item:
             buf = tao_anh_bbt(item["bang_xet_dau"], is_xet_dau=True)
             if buf:
-                slide.shapes.add_picture(buf, Inches(2.5), top_pos, width=Inches(8))
+                slide.shapes.add_picture(buf, Inches(2.5), pic_top, width=Inches(8))
 
     prs.save(file_ra)
     return file_ra
 
-# 4. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
+# 5. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
 def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
@@ -296,7 +319,7 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
 
-# 5. GIAO DIỆN CHÍNH
+# 6. GIAO DIỆN CHÍNH
 st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
 file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
 
@@ -312,7 +335,7 @@ if file_tai_len and selected_model:
                     st.download_button(
                         label="📥 Tải bài giảng về máy (.pptx)",
                         data=f,
-                        file_name="GiaoAn_ToanHoc.pptx",
+                        file_name="GiaoAn_ToanHoc_KhongLoi.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
             except Exception as e:
