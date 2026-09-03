@@ -98,7 +98,6 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
         if i < len(x_data) and x_data[i]: 
             ax.text(col_x, rows - 0.5, str(x_data[i]), ha='center', va='center', fontsize=15)
             
-        # Nội suy dấu đạo hàm chính xác từ các ô lân cận
         left_sign, right_sign = "", ""
         for j in range(i-1, -1, -1):
             if j < len(y_phay_data) and y_phay_data[j].strip() in ["+", "-"]:
@@ -110,7 +109,6 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
         val_yp = str(y_phay_data[i]).strip() if i < len(y_phay_data) else ""
         val_y = str(y_val_data[i]).strip() if i < len(y_val_data) else ""
         
-        # Bắt thóp AI: Tự động kẻ tiệm cận dù AI quên
         is_undefined = False
         if val_yp == "||" or "||" in val_y:
             is_undefined = True
@@ -129,7 +127,6 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
                 p1 = parts[0] if len(parts) > 0 and parts[0] else ""
                 p2 = parts[1] if len(parts) > 1 and parts[1] else ""
                 
-                # CƯỠNG CHẾ TOÁN HỌC: Nếu AI tính sai giới hạn, Python sẽ tự sửa lại dựa vào dấu đạo hàm
                 if "∞" in p1 or p1 == "": p1 = "-∞" if left_sign == "-" else "+∞"
                 if "∞" in p2 or p2 == "": p2 = "+∞" if right_sign == "-" else "-∞"
                 
@@ -161,7 +158,6 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
             dx, dy = x2 - x1, y2 - y1
             sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0)
             
-            # Cấm vẽ mũi tên đi ngang bậy bạ
             if sign_y != 0:
                 ax.annotate("", xy=(x2 - 0.2, y2 - 0.15 * sign_y), 
                             xytext=(x1 + 0.2, y1 + 0.15 * sign_y),
@@ -207,7 +203,6 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
-        # Trải từng dòng thành Textbox độc lập
         top_pos = Inches(1.3)
         for bullet in item.get("noi_dung", []):
             c_box = slide.shapes.add_textbox(Inches(0.8), top_pos, Inches(11.7), Inches(0.5))
@@ -218,9 +213,8 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
             p_c.text = f"• {bullet}"
             p_c.font.size = Pt(22)
             p_c.font.color.rgb = RGBColor(50, 50, 50)
-            top_pos += Inches(0.55) # Tự động đẩy dòng tiếp theo xuống
+            top_pos += Inches(0.55)
 
-        # Tính toán tọa độ và chèn Bảng/Hình động ngay dưới dòng Textbox cuối cùng
         if "do_thi" in item:
             dt = item["do_thi"]
             buf = tao_anh_do_thi(dt.get("bieu_thuc", "x"), dt.get("x_min", -5), dt.get("x_max", 5))
@@ -301,3 +295,25 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     except Exception as e:
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
+
+# 5. GIAO DIỆN CHÍNH
+st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
+file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
+
+if file_tai_len and selected_model:
+    if st.button("🚀 Bắt đầu soạn giáo án tự động"):
+        with st.spinner(f"AI ({selected_model}) đang thiết kế giáo án và vẽ đồ họa..."):
+            try:
+                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
+                file_ppt = xuat_powerpoint(du_lieu_json)
+                st.success("🎉 Đã soạn xong bài giảng PowerPoint!")
+
+                with open(file_ppt, "rb") as f:
+                    st.download_button(
+                        label="📥 Tải bài giảng về máy (.pptx)",
+                        data=f,
+                        file_name="GiaoAn_ToanHoc.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+            except Exception as e:
+                st.error(f"Lỗi khi phân tích: {str(e)}")
