@@ -289,11 +289,18 @@ def build_prompt(config: LessonConfig) -> str:
     return f"""
 Bạn là chuyên gia Toán THPT. Viết bài giảng bám sát cấu trúc GDPT 2018 (5 hoạt động).
 - Bài: {config.lesson or 'Tự xác định từ tài liệu'}
-- Đối tượng: {config.student_level}; Số slide dự kiến: {config.slide_count}
-Mỗi slide có tối đa 6 gạch đầu dòng ngắn gọn. {answer_rule}
+- Đối tượng: {config.student_level}; Số slide dự kiến: {config.slide_count} (CỰC KỲ QUAN TRỌNG: Phải dàn đều nội dung ra đủ số lượng slide này, không được gộp ép).
+
+YÊU CẦU SƯ PHẠM (Phân bổ rành mạch cho 3 tiết học):
+- TIẾT 1 (Khái niệm & Khoảng): Dạy định nghĩa GTLN, GTNN. Cách tìm trên một khoảng bằng Bảng biến thiên. Thiết kế 3-4 ví dụ và bài tập.
+- TIẾT 2 (Đoạn [a; b]): Dạy Quy tắc 3 bước trên đoạn. Tuyệt đối nhấn mạnh KHÔNG CẦN vẽ Bảng biến thiên. Cung cấp 4-5 bài tập luyện tập.
+- TIẾT 3 (Thực tế): Quay lại giải quyết bài toán thực tế hộp carton ở phần Khởi động. Thêm 5 câu trắc nghiệm Củng cố (tạo các bẫy nhầm lẫn giữa khoảng và đoạn).
+- Quy tắc trình bày: MỖI định nghĩa, MỖI bước giải, MỖI ví dụ, MỖI câu trắc nghiệm PHẢI nằm trên MỘT slide độc lập. Tối đa 5-6 dòng/slide. {answer_rule}
+
 ĐỒ HỌA TÙY CHỌN:
 - graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
 - variation_table: {{"points":["-∞","-1","1","+∞"], "interval_signs":["+","-","+"], "values":["-∞","2","-2","+∞"]}}.
+
 Trả về duy nhất JSON chuẩn:
 {{
   "title":"Tên bài học",
@@ -302,7 +309,7 @@ Trả về duy nhất JSON chuẩn:
     "activity":"HÌNH THÀNH KIẾN THỨC",
     "bullets":["Ý 1","Ý 2"],
     "answer":"",
-    "teacher_note":"",
+    "teacher_note":"Ghi chú giảng dạy chi tiết cho giáo viên",
     "graph":null,
     "variation_table":null
   }}]
