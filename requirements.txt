@@ -3,4 +3,4 @@ pandas
 sympy
 python-pptx
 python-docx
-google-genai
+google-generativeai
