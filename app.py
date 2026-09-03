@@ -41,31 +41,55 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
-# 1. BỘ LỌC ĐỊNH DẠNG TOÁN HỌC (MỚI)
+# 1. BỘ LỌC ĐỊNH DẠNG TOÁN HỌC (ĐÃ NÂNG CẤP TỪ VỰNG)
 def dinh_dang_toan_hoc(text):
     if not isinstance(text, str): return text
-    # Xử lý lũy thừa
+    
+    # Ký hiệu đặc biệt
     text = text.replace('**2', '²').replace('^2', '²')
     text = text.replace('**3', '³').replace('^3', '³')
     text = text.replace('**4', '⁴').replace('^4', '⁴')
-    # Xử lý chỉ số dưới
+    text = text.replace('+inf', '+∞').replace('-inf', '-∞').replace('inf', '∞')
+    text = text.replace('sqrt', '√').replace('pi', 'π')
+    
+    # Xử lý đạo hàm
+    text = text.replace('y_phay', "y'").replace('f_phay', "f'").replace('V_phay', "V'")
+    
+    # Ký hiệu logic
+    text = text.replace('<=>', '⇔').replace('=>', '⇒')
+    text = text.replace('>=', '≥').replace('<=', '≤').replace('!=', '≠')
+    
+    # Chỉ số dưới
     subscripts = {'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', 'i': 'ᵢ'}
     for k, v in subscripts.items():
         text = text.replace(f'_{k}', v)
-    # Xử lý ký hiệu logic
-    text = text.replace('<=>', '⇔').replace('=>', '⇒')
-    text = text.replace('>=', '≥').replace('<=', '≤')
+        
     return text
 
-# 2. HÀM VẼ ĐỒ THỊ HÀM SỐ
+# 2. HÀM VẼ ĐỒ THỊ HÀM SỐ (BỔ SUNG LƯỢNG GIÁC, LOGARIT, MŨ)
 def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
     try:
         fig, ax = plt.subplots(figsize=(6, 4))
-        x = np.linspace(x_min, x_max, 400)
+        # Tăng mật độ điểm ảnh để đồ thị mượt hơn
+        x = np.linspace(x_min, x_max, 800)
         
         bieu_thuc_ve = bieu_thuc.replace('^', '**')
-        safe_dict = {"x": x, "np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt, "abs": np.abs, "exp": np.exp}
-        y = eval(bieu_thuc_ve, {"__builtins__": None}, safe_dict)
+        # Nạp toàn bộ thư viện toán học cao cấp để tránh lỗi eval
+        safe_dict = {
+            "x": x, "np": np, 
+            "sin": np.sin, "cos": np.cos, "tan": np.tan, 
+            "sqrt": np.sqrt, "abs": np.abs, 
+            "exp": np.exp, "e": np.e, 
+            "ln": np.log, "log": np.log10,
+            "pi": np.pi
+        }
+        
+        # Bắt lỗi chia cho 0 ngầm định của numpy
+        with np.errstate(divide='ignore', invalid='ignore'):
+            y = eval(bieu_thuc_ve, {"__builtins__": None}, safe_dict)
+            
+            # Xử lý tiệm cận đứng (ngắt đường vẽ tại các điểm gián đoạn)
+            y = np.where(np.abs(y) > 100, np.nan, y)
         
         ax.plot(x, y, color='blue', lw=2)
         ax.axhline(0, color='black', lw=1.2)
@@ -73,7 +97,7 @@ def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
         ax.grid(True, linestyle='--', alpha=0.6)
         
         y_min, y_max = np.nanmin(y), np.nanmax(y)
-        if y_max - y_min > 50: ax.set_ylim(-20, 20)
+        if y_max - y_min > 30: ax.set_ylim(-15, 15)
             
         ax.set_title(f"Đồ thị: y = {dinh_dang_toan_hoc(bieu_thuc)}", fontsize=12)
         
@@ -111,8 +135,10 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
     y_coords = []
     for i in range(n):
         col_x = 1.5 + i
+        # Lọc Unicode ngay từ khâu vẽ Bảng
         if i < len(x_data) and x_data[i]: 
-            ax.text(col_x, rows - 0.5, str(x_data[i]), ha='center', va='center', fontsize=15)
+            x_val = dinh_dang_toan_hoc(str(x_data[i]))
+            ax.text(col_x, rows - 0.5, x_val, ha='center', va='center', fontsize=15)
             
         left_sign, right_sign = "", ""
         for j in range(i-1, -1, -1):
@@ -122,8 +148,8 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
             if j < len(y_phay_data) and y_phay_data[j].strip() in ["+", "-"]:
                 right_sign = y_phay_data[j].strip(); break
                 
-        val_yp = str(y_phay_data[i]).strip() if i < len(y_phay_data) else ""
-        val_y = str(y_val_data[i]).strip() if i < len(y_val_data) else ""
+        val_yp = dinh_dang_toan_hoc(str(y_phay_data[i]).strip()) if i < len(y_phay_data) else ""
+        val_y = dinh_dang_toan_hoc(str(y_val_data[i]).strip()) if i < len(y_val_data) else ""
         
         is_undefined = False
         if val_yp == "||" or "||" in val_y: is_undefined = True
@@ -184,7 +210,7 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
     plt.close(fig)
     return buf
 
-# 4. HÀM TẠO POWERPOINT (TÁCH TEXTBOX CHỐNG ĐÈ CHỮ)
+# 4. HÀM TẠO POWERPOINT 
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -216,11 +242,9 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
-        # Trải từng dòng thành Textbox độc lập, chiều cao động
         top_pos = Inches(1.2)
         for bullet in item.get("noi_dung", []):
             bullet_sach = dinh_dang_toan_hoc(str(bullet))
-            # Thuật toán co giãn: Đếm số lượng ký tự để tính số dòng tương đối
             so_dong = (len(bullet_sach) // 70) + 1
             chieu_cao_box = Inches(0.4 * so_dong)
             
@@ -233,10 +257,8 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
             p_c.font.size = Pt(22)
             p_c.font.color.rgb = RGBColor(50, 50, 50)
             
-            # Cộng dồn tọa độ để dòng tiếp theo không đè lên
             top_pos += chieu_cao_box + Inches(0.05)
 
-        # Tính toán tọa độ ép giới hạn để hình vẽ không bị văng ra khỏi slide
         pic_top = min(top_pos, Inches(4.5))
         if "do_thi" in item:
             dt = item["do_thi"]
@@ -257,7 +279,7 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs.save(file_ra)
     return file_ra
 
-# 5. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
+# 5. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU (ÉP BUỘC CÚ PHÁP ĐỒ THỊ)
 def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
@@ -266,10 +288,11 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     Bạn là chuyên gia Toán học. Biên soạn giáo án PowerPoint theo cấu trúc.
     Dịch toàn bộ mã LaTeX sang Unicode (x₁, x², ∞, ∈, ℝ, phân số a/b). KHÔNG để lại dấu \\.
     
-    YÊU CẦU ĐỒ HỌA TRỰC QUAN (BẮT BUỘC ĐỐI VỚI BÀI HÀM SỐ):
+    YÊU CẦU ĐỒ HỌA TRỰC QUAN (BẮT BUỘC ĐỐI VỚI BÀI HÀM SỐ, CỰC TRỊ, GTLN-GTNN):
+    Hễ có ví dụ hàm số, BẮT BUỘC chèn 1 trong 3 module sau:
     1. "bang_xet_dau": Gồm "x" và "y_phay". 
-    2. "bang_bien_thien": Gồm "x", "y_phay", "y_val". (TIỆM CẬN ĐỨNG BẮT BUỘC DÙNG '||' trong y_phay VÀ y_val).
-    3. "do_thi": "bieu_thuc" (Dùng cú pháp Python x**3 - 3*x**2), "x_min", "x_max".
+    2. "bang_bien_thien": Gồm "x", "y_phay", "y_val". (TIỆM CẬN ĐỨNG BẮT BUỘC DÙNG '||').
+    3. "do_thi": BẮT BUỘC dùng cú pháp Python chuẩn cho "bieu_thuc" (VD: x**3 - 3*x, sqrt(1 - x**2), sin(x) + cos(x), x * exp(-x)). Cung cấp "x_min", "x_max".
     
     ĐỊNH DẠNG ĐẦU RA JSON (Tối thiểu 15 Slide, Tách nhỏ ví dụ ra từng Slide):
     {
@@ -278,13 +301,9 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
         "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Ví dụ Bảng biến thiên",
-                "noi_dung": ["Bảng biến thiên:"],
-                "bang_bien_thien": {
-                    "x": ["-∞", "", "1", "", "3", "", "+∞"],
-                    "y_phay": ["", "+", "0", "-", "0", "+", ""],
-                    "y_val": ["-∞", "", "4", "", "0", "", "+∞"]
-                }
+                "tieu_de_slide": "Ví dụ Đồ thị",
+                "noi_dung": ["Quan sát đồ thị:"],
+                "do_thi": {"bieu_thuc": "sqrt(1 - x**2)", "x_min": -1, "x_max": 1}
             }
         ]
     }
@@ -335,7 +354,7 @@ if file_tai_len and selected_model:
                     st.download_button(
                         label="📥 Tải bài giảng về máy (.pptx)",
                         data=f,
-                        file_name="GiaoAn_ToanHoc_KhongLoi.pptx",
+                        file_name="GiaoAn_ToanHoc_HoanThien.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
             except Exception as e:
