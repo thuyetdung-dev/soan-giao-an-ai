@@ -156,13 +156,14 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
     plt.close(fig)
     return buf
 
-# 3. HÀM TẠO POWERPOINT
+# 3. HÀM TẠO POWERPOINT (ĐÃ NÂNG CẤP TÁCH TEXTBOX)
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
+    # Slide Tiêu đề
     slide_title = prs.slides.add_slide(blank_layout)
     tx = slide_title.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
     p = tx.text_frame.paragraphs[0]
@@ -178,9 +179,11 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     p2.font.color.rgb = RGBColor(100, 100, 100)
     p2.alignment = PP_ALIGN.CENTER
 
+    # Các slide nội dung
     for item in noi_dung_bai_hoc.get("cac_slide", []):
         slide = prs.slides.add_slide(blank_layout)
         
+        # Tiêu đề Slide
         t_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.7), Inches(0.8))
         p_t = t_box.text_frame.paragraphs[0]
         p_t.text = str(item.get("tieu_de_slide", ""))
@@ -188,35 +191,47 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
+        # Trạng thái kiểm tra có hình ảnh hay không để ép khoảng cách dòng
         has_graphic = "bang_bien_thien" in item or "bang_xet_dau" in item or "do_thi" in item
-        chieu_cao_chu_thich = Inches(2.5) if has_graphic else Inches(5)
         
-        c_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.7), chieu_cao_chu_thich)
-        tf_c = c_box.text_frame
-        tf_c.word_wrap = True
+        # Tọa độ Y bắt đầu cho câu đầu tiên
+        top_pos = Inches(1.2) 
+        # Nếu có hình, các dòng chữ phải xếp khít lại để nhường không gian phía dưới
+        khoang_cach_dong = Inches(0.45) if has_graphic else Inches(0.6)
         
-        for idx, bullet in enumerate(item.get("noi_dung", [])):
-            p_c = tf_c.paragraphs[0] if idx == 0 else tf_c.add_paragraph()
+        # TÁCH ĐỘC LẬP TỪNG TEXTBOX
+        for bullet in item.get("noi_dung", []):
+            # Mỗi câu là một shape mới
+            c_box = slide.shapes.add_textbox(Inches(0.8), top_pos, Inches(11.7), Inches(0.5))
+            tf_c = c_box.text_frame
+            tf_c.word_wrap = True
+            
+            p_c = tf_c.paragraphs[0]
             p_c.text = f"• {bullet}"
             p_c.font.size = Pt(20)
             p_c.font.color.rgb = RGBColor(50, 50, 50)
-            p_c.space_after = Pt(10)
+            
+            # Cốt lõi: Cộng dồn tọa độ Y để đẩy câu tiếp theo xuống dưới
+            top_pos += khoang_cach_dong
 
+        # Chèn Đồ thị
         if "do_thi" in item:
             dt = item["do_thi"]
             buf = tao_anh_do_thi(dt.get("bieu_thuc", "x"), dt.get("x_min", -5), dt.get("x_max", 5))
             if buf:
-                slide.shapes.add_picture(buf, Inches(3.5), Inches(3.5), width=Inches(6))
+                slide.shapes.add_picture(buf, Inches(3.5), Inches(3.8), width=Inches(5.5))
                 
+        # Chèn Bảng biến thiên
         elif "bang_bien_thien" in item:
             buf = tao_anh_bbt(item["bang_bien_thien"], is_xet_dau=False)
             if buf:
-                slide.shapes.add_picture(buf, Inches(2.1), Inches(3.8), width=Inches(9))
+                slide.shapes.add_picture(buf, Inches(2.1), Inches(4.0), width=Inches(9))
                 
+        # Chèn Bảng xét dấu
         elif "bang_xet_dau" in item:
             buf = tao_anh_bbt(item["bang_xet_dau"], is_xet_dau=True)
             if buf:
-                slide.shapes.add_picture(buf, Inches(2.5), Inches(4.2), width=Inches(8))
+                slide.shapes.add_picture(buf, Inches(2.5), Inches(4.5), width=Inches(8))
 
     prs.save(file_ra)
     return file_ra
