@@ -1,25 +1,32 @@
 import json
-import time
 import io
 import streamlit as st
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from google import genai
-from google.genai import types
 import docx
+
+# 1. ĐỔI SANG THƯ VIỆN GIỐNG HỆT APP GAME
+import google.generativeai as genai
 
 # CẤU HÌNH TRANG WEB
 st.set_page_config(page_title="Soạn PowerPoint Tự Động", layout="wide")
 st.title("📚 Trợ Lý Soạn Giáo Án PowerPoint Tự Động")
 
-# GẮN TRỰC TIẾP API KEY CỦA THẦY VÀO ĐÂY
-API_KEY = "AIzaSyBKfKYlRp81PB94OHslXZmT37MDHLcO8lM"
+# LẤY KHÓA TỪ SECRETS (Giống hệt app Game)
+try:
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    API_KEY = ""
+    st.error("Chưa tìm thấy khóa API trong mục Secrets!")
 
 with st.sidebar:
     st.header("⚙️ Cấu hình hệ thống")
-    st.success("✅ Đã kết nối Gemini API thành công!")
+    if API_KEY:
+        st.success("✅ Đã nhận cấu hình API Key từ Secrets!")
+    else:
+        st.error("❌ Thiếu API Key!")
 
 # 1. HÀM TẠO POWERPOINT TỰ ĐỘNG
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
@@ -71,9 +78,9 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs.save(file_ra)
     return file_ra
 
-# 2. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU (CÓ TỰ ĐỘNG THỬ LẠI NẾU MÁY CHỦ BẬN)
+# 2. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
 def phan_tich_tai_lieu_ai(file_tai_len, key):
-    client = genai.Client(api_key=key)
+    genai.configure(api_key=key)
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
 
@@ -95,7 +102,7 @@ def phan_tich_tai_lieu_ai(file_tai_len, key):
 
     if ten_file.endswith(".pdf"):
         noi_dung_input = [
-            types.Part.from_bytes(data=file_bytes, mime_type="application/pdf"),
+            {"mime_type": "application/pdf", "data": file_bytes},
             prompt
         ]
     elif ten_file.endswith(".docx"):
@@ -106,59 +113,8 @@ def phan_tich_tai_lieu_ai(file_tai_len, key):
         text = file_bytes.decode("utf-8", errors="ignore")
         noi_dung_input = [f"Nội dung tài liệu:\n{text[:10000]}\n\n{prompt}"]
 
-    # Thử gọi tối đa 3 lần nếu máy chủ Google quá tải tạm thời (503)
-    for lan_thu in range(3):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=noi_dung_input,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                )
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            if "503" in str(e) and lan_thu < 2:
-                time.sleep(3)  # Chờ 3 giây rồi tự động thử lại
-                continue
-            raise e
-
-    prompt = """
-    Bạn là chuyên gia sư phạm. Hãy phân tích tài liệu được cung cấp và thiết kế cấu trúc bài giảng PowerPoint chuẩn mực từ 4 đến 7 slide.
-    Xuất ra DUY NHẤT định dạng JSON thuần (không kèm bất kỳ văn bản giải thích nào khác) theo mẫu sau:
-    {
-        "tieu_de": "Tên bài học",
-        "mon": "Môn học",
-        "giao_vien": "Tên giáo viên",
-        "cac_slide": [
-            {
-                "tieu_de_slide": "Tiêu đề Slide",
-                "noi_dung": ["Ý chính 1", "Ý chính 2", "Ý chính 3"]
-            }
-        ]
-    }
-    """
-
-    if ten_file.endswith(".pdf"):
-        noi_dung_input = [
-            types.Part.from_bytes(data=file_bytes, mime_type="application/pdf"),
-            prompt
-        ]
-    elif ten_file.endswith(".docx"):
-        doc = docx.Document(io.BytesIO(file_bytes))
-        text = "\n".join([p.text for p in doc.paragraphs if p.text])
-        noi_dung_input = [f"Nội dung tài liệu:\n{text[:10000]}\n\n{prompt}"]
-    else:
-        text = file_bytes.decode("utf-8", errors="ignore")
-        noi_dung_input = [f"Nội dung tài liệu:\n{text[:10000]}\n\n{prompt}"]
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=noi_dung_input,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json"
-        )
-    )
+    model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
+    response = model.generate_content(noi_dung_input)
     return json.loads(response.text)
 
 # GIAO DIỆN CHÍNH
