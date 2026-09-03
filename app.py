@@ -3,6 +3,7 @@ import io
 import re
 import streamlit as st
 import matplotlib.pyplot as plt
+import numpy as np
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
@@ -28,7 +29,6 @@ with st.sidebar:
         try:
             available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             if available_models:
-                # Đặt mặc định là mô hình mạnh để tránh lỗi JSON
                 default_index = available_models.index('models/gemini-1.5-flash') if 'models/gemini-1.5-flash' in available_models else 0
                 selected_model = st.selectbox("🤖 Chọn mô hình AI:", available_models, index=default_index)
             else:
@@ -41,8 +41,42 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
-# HÀM VẼ BẢNG BIẾN THIÊN TỰ ĐỘNG
-def tao_anh_bbt(bbt_data):
+# 1. HÀM VẼ ĐỒ THỊ HÀM SỐ (MODULE MỚI)
+def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
+    try:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        x = np.linspace(x_min, x_max, 400)
+        
+        # Xử lý an toàn biểu thức để vẽ
+        bieu_thuc = bieu_thuc.replace('^', '**')
+        safe_dict = {"x": x, "np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt, "abs": np.abs, "exp": np.exp}
+        y = eval(bieu_thuc, {"__builtins__": None}, safe_dict)
+        
+        ax.plot(x, y, color='blue', lw=2)
+        
+        # Vẽ trục tọa độ
+        ax.axhline(0, color='black', lw=1.2)
+        ax.axvline(0, color='black', lw=1.2)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        
+        # Giới hạn trục Y để đồ thị không bị kéo giãn quá mức
+        y_min, y_max = np.nanmin(y), np.nanmax(y)
+        if y_max - y_min > 50:
+            ax.set_ylim(-20, 20)
+            
+        ax.set_title(f"Đồ thị: y = {bieu_thuc.replace('**', '^')}", fontsize=12)
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=300, transparent=True)
+        buf.seek(0)
+        plt.close(fig)
+        return buf
+    except Exception as e:
+        plt.close(fig)
+        return None
+
+# 2. HÀM VẼ BẢNG XÉT DẤU VÀ BẢNG BIẾN THIÊN
+def tao_anh_bbt(bbt_data, is_xet_dau=False):
     x_data = bbt_data.get("x", [])
     y_phay_data = bbt_data.get("y_phay", [])
     y_val_data = bbt_data.get("y_val", [])
@@ -50,35 +84,43 @@ def tao_anh_bbt(bbt_data):
     n = len(x_data)
     if n == 0: return None
     
-    fig, ax = plt.subplots(figsize=(n * 1.2, 3))
+    rows = 2 if is_xet_dau else 3
+    fig, ax = plt.subplots(figsize=(n * 1.2, rows))
     ax.axis('off')
     
-    ax.plot([0, n+1], [2, 2], color='black', lw=1.2)
-    ax.plot([0, n+1], [1, 1], color='black', lw=1.2)
-    ax.plot([1, 1], [0, 3], color='black', lw=1.2)
+    # Kẻ khung ngang
+    for r in range(rows + 1):
+        ax.plot([0, n+1], [r, r], color='black', lw=1.2)
+    # Kẻ vách dọc đầu tiên
+    ax.plot([1, 1], [0, rows], color='black', lw=1.2)
     
-    ax.text(0.5, 2.5, 'x', ha='center', va='center', fontsize=16, style='italic')
-    ax.text(0.5, 1.5, 'y\'', ha='center', va='center', fontsize=16, style='italic')
-    ax.text(0.5, 0.5, 'y', ha='center', va='center', fontsize=16, style='italic')
+    # Gắn nhãn
+    ax.text(0.5, rows - 0.5, 'x', ha='center', va='center', fontsize=16, style='italic')
+    ax.text(0.5, rows - 1.5, 'y\'', ha='center', va='center', fontsize=16, style='italic')
+    if not is_xet_dau:
+        ax.text(0.5, 0.5, 'y', ha='center', va='center', fontsize=16, style='italic')
     
     y_coords = []
     for i in range(n):
         col_x = 1.5 + i
+        # Hàng x
         if i < len(x_data) and x_data[i]: 
-            ax.text(col_x, 2.5, str(x_data[i]), ha='center', va='center', fontsize=15)
+            ax.text(col_x, rows - 0.5, str(x_data[i]), ha='center', va='center', fontsize=15)
             
         left_sign = str(y_phay_data[i-1]).strip() if i > 0 and i-1 < len(y_phay_data) else ""
         right_sign = str(y_phay_data[i+1]).strip() if i+1 < len(y_phay_data) else ""
         
+        # Hàng y'
         if i < len(y_phay_data):
             val_yp = str(y_phay_data[i]).strip()
             if val_yp == "||":
-                ax.plot([col_x-0.03, col_x-0.03], [0, 2], color='black', lw=1.2)
-                ax.plot([col_x+0.03, col_x+0.03], [0, 2], color='black', lw=1.2)
+                ax.plot([col_x-0.03, col_x-0.03], [0, rows - 1], color='black', lw=1.2)
+                ax.plot([col_x+0.03, col_x+0.03], [0, rows - 1], color='black', lw=1.2)
             elif val_yp: 
-                ax.text(col_x, 1.5, val_yp, ha='center', va='center', fontsize=15)
+                ax.text(col_x, rows - 1.5, val_yp, ha='center', va='center', fontsize=15)
                 
-        if i < len(y_val_data) and y_val_data[i]:
+        # Hàng y (chỉ dành cho bảng biến thiên)
+        if not is_xet_dau and i < len(y_val_data) and y_val_data[i]:
             val_y = str(y_val_data[i]).strip()
             
             if "||" in val_y:
@@ -87,7 +129,6 @@ def tao_anh_bbt(bbt_data):
                     p1, p2 = parts[0].strip(), parts[1].strip()
                     pos1 = 0.15 if left_sign == "-" else 0.85
                     pos2 = 0.85 if right_sign == "-" else 0.15
-                    
                     ax.text(col_x - 0.25, pos1, p1, ha='right', va='center', fontsize=14)
                     ax.text(col_x + 0.25, pos2, p2, ha='left', va='center', fontsize=14)
                     y_coords.append((col_x - 0.25, pos1))
@@ -104,35 +145,35 @@ def tao_anh_bbt(bbt_data):
             y_coords.append((col_x, pos))
             ax.text(col_x, pos, val_y, ha='center', va='center', fontsize=15)
     
-    for i in range(len(y_coords)-1):
-        x1, y1 = y_coords[i]
-        x2, y2 = y_coords[i+1]
-        
-        if abs(x2 - x1) < 0.6: continue
-        
-        dx, dy = x2 - x1, y2 - y1
-        sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0.01)
-        shrink_x, shrink_y = 0.2, 0.2
-        
-        ax.annotate("", xy=(x2 - shrink_x, y2 - shrink_y * sign_y), 
-                    xytext=(x1 + shrink_x, y1 + shrink_y * sign_y),
-                    arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
-                    
+    # Vẽ mũi tên cho BBT
+    if not is_xet_dau:
+        for i in range(len(y_coords)-1):
+            x1, y1 = y_coords[i]
+            x2, y2 = y_coords[i+1]
+            if abs(x2 - x1) < 0.6: continue
+            
+            dx, dy = x2 - x1, y2 - y1
+            sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0.01)
+            ax.annotate("", xy=(x2 - 0.2, y2 - 0.2 * sign_y), 
+                        xytext=(x1 + 0.2, y1 + 0.2 * sign_y),
+                        arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
+                        
     ax.set_xlim(0, n+1)
-    ax.set_ylim(0, 3)
+    ax.set_ylim(0, rows)
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=300, transparent=True)
     buf.seek(0)
     plt.close(fig)
     return buf
 
-# HÀM TẠO POWERPOINT
+# 3. HÀM TẠO POWERPOINT
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
+    # Slide Tiêu đề
     slide_title = prs.slides.add_slide(blank_layout)
     tx = slide_title.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
     p = tx.text_frame.paragraphs[0]
@@ -148,6 +189,7 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     p2.font.color.rgb = RGBColor(100, 100, 100)
     p2.alignment = PP_ALIGN.CENTER
 
+    # Các slide nội dung
     for item in noi_dung_bai_hoc.get("cac_slide", []):
         slide = prs.slides.add_slide(blank_layout)
         
@@ -158,8 +200,8 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
-        bbt = item.get("bang_bien_thien")
-        chieu_cao_chu_thich = Inches(5) if not bbt else Inches(2.5)
+        has_graphic = "bang_bien_thien" in item or "bang_xet_dau" in item or "do_thi" in item
+        chieu_cao_chu_thich = Inches(2.5) if has_graphic else Inches(5)
         
         c_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.7), chieu_cao_chu_thich)
         tf_c = c_box.text_frame
@@ -172,42 +214,75 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
             p_c.font.color.rgb = RGBColor(50, 50, 50)
             p_c.space_after = Pt(10)
 
-        if bbt and isinstance(bbt, dict):
-            buf = tao_anh_bbt(bbt)
+        # Chèn Đồ thị
+        if "do_thi" in item:
+            dt = item["do_thi"]
+            buf = tao_anh_do_thi(dt.get("bieu_thuc", "x"), dt.get("x_min", -5), dt.get("x_max", 5))
+            if buf:
+                slide.shapes.add_picture(buf, Inches(3.5), Inches(3.5), width=Inches(6))
+                
+        # Chèn Bảng biến thiên
+        elif "bang_bien_thien" in item:
+            buf = tao_anh_bbt(item["bang_bien_thien"], is_xet_dau=False)
             if buf:
                 slide.shapes.add_picture(buf, Inches(2.1), Inches(3.8), width=Inches(9))
+                
+        # Chèn Bảng xét dấu
+        elif "bang_xet_dau" in item:
+            buf = tao_anh_bbt(item["bang_xet_dau"], is_xet_dau=True)
+            if buf:
+                slide.shapes.add_picture(buf, Inches(2.5), Inches(4.2), width=Inches(8))
 
     prs.save(file_ra)
     return file_ra
 
-# HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
+# 4. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
 def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
 
     prompt = """
-    Bạn là chuyên gia sư phạm Toán học cấp THPT. Đọc TOÀN BỘ tài liệu được cung cấp và biên soạn giáo án PowerPoint.
+    Bạn là chuyên gia sư phạm Toán học. Đọc tài liệu và biên soạn giáo án PowerPoint.
     
-    CẢNH BÁO TỐI QUAN TRỌNG VỀ LỖI JSON (KHỬ ĐỘC LATEX):
-    - Tài liệu gốc có chứa nhiều mã LaTeX (ví dụ: \\vec{AB}, \\sqrt{}, \\circ). 
-    - BẠN TUYỆT ĐỐI KHÔNG ĐƯỢC GIỮ LẠI DẤU GẠCH CHÉO NGƯỢC (\\) TRONG KẾT QUẢ ĐẦU RA JSON. Nó sẽ làm sập hệ thống.
-    - HÃY DỊCH LATEX SANG VĂN BẢN THƯỜNG: Ví dụ: Dịch \\vec{AB} thành "vectơ AB", dịch \\sqrt{13} thành "căn 13", độ thành "độ". Dùng ký hiệu Unicode x₁, x₂, ∞, ∈, ℝ, phân số a/b.
+    CẢNH BÁO: Dịch toàn bộ mã LaTeX sang Unicode (VD: x₁, x², ∞, ∈, ℝ, phân số a/b). TUYỆT ĐỐI không để lại dấu \\.
     
-    LỆNH KỶ LUẬT:
-    1. BẮT BUỘC tạo ra từ 15-25 slide. Mỗi bài toán, định lý hoặc ví dụ phải nằm trên 1 slide độc lập. ĐỪNG CẮT XÉN NỘI DUNG.
+    YÊU CẦU ĐỒ HỌA TRỰC QUAN (BẮT BUỘC ĐỐI VỚI BÀI HÀM SỐ):
+    Hễ tài liệu nhắc đến hàm số cụ thể, bạn BẮT BUỘC phải chèn 1 trong 3 đối tượng sau vào JSON của slide đó:
+    1. "bang_xet_dau": Gồm 2 mảng "x" và "y_phay" (Dùng khi xét dấu đạo hàm).
+    2. "bang_bien_thien": Gồm 3 mảng "x", "y_phay", "y_val" (Dùng khi tìm cực trị/đơn điệu).
+    3. "do_thi": Vẽ đồ thị. Cung cấp "bieu_thuc" (phải dùng cú pháp Python như x**3 - 3*x**2), "x_min", "x_max".
     
-    ĐỊNH DẠNG ĐẦU RA (Chỉ xuất JSON thuần, KHÔNG có thẻ markdown):
+    ĐỊNH DẠNG ĐẦU RA JSON:
     {
-        "tieu_de": "Tên bài học trích từ tài liệu",
+        "tieu_de": "Tên bài học",
         "mon": "Toán học",
         "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Ví dụ về Vectơ Không gian",
-                "noi_dung": ["Ta có vectơ AB = ... (đã dịch từ mã latex)"]
+                "tieu_de_slide": "Ví dụ Đồ thị",
+                "noi_dung": ["Quan sát đồ thị hàm số y = x³ - 3x:"],
+                "do_thi": {"bieu_thuc": "x**3 - 3*x", "x_min": -3, "x_max": 3}
+            },
+            {
+                "tieu_de_slide": "Bảng xét dấu",
+                "noi_dung": ["Ta có bảng xét dấu đạo hàm:"],
+                "bang_xet_dau": {
+                    "x": ["-∞", "", "1", "", "+∞"],
+                    "y_phay": ["", "+", "0", "-", ""]
+                }
+            },
+            {
+                "tieu_de_slide": "Bảng biến thiên",
+                "noi_dung": ["Bảng biến thiên hoàn chỉnh:"],
+                "bang_bien_thien": {
+                    "x": ["-∞", "", "1", "", "3", "", "+∞"],
+                    "y_phay": ["", "+", "0", "-", "0", "+", ""],
+                    "y_val": ["-∞", "", "4", "", "0", "", "+∞"]
+                }
             }
         ]
     }
+    LƯU Ý: Phải xuất tối thiểu 15 slide. Đừng gộp các ví dụ lại với nhau. Trả về JSON thuần.
     """
 
     if ten_file.endswith(".pdf"):
@@ -224,8 +299,10 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     response = model.generate_content(noi_dung_input)
     
     raw_json = response.text
-    raw_json = re.sub(r'```(?:json)?', '', raw_json).strip()
-    raw_json = re.sub(r'```', '', raw_json).strip()
+    raw_json = re.sub(r'
+```(?:json)?', '', raw_json).strip()
+    raw_json = re.sub(r'
+```', '', raw_json).strip()
     
     try:
         match = re.search(r'\{.*\}', raw_json, re.DOTALL)
@@ -238,25 +315,3 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     except Exception as e:
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
-
-# GIAO DIỆN CHÍNH
-st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
-file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
-
-if file_tai_len and selected_model:
-    if st.button("🚀 Bắt đầu soạn giáo án tự động"):
-        with st.spinner(f"AI ({selected_model}) đang thiết kế giáo án và vẽ đồ họa..."):
-            try:
-                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
-                file_ppt = xuat_powerpoint(du_lieu_json)
-                st.success("🎉 Đã soạn xong bài giảng PowerPoint!")
-
-                with open(file_ppt, "rb") as f:
-                    st.download_button(
-                        label="📥 Tải bài giảng về máy (.pptx)",
-                        data=f,
-                        file_name="GiaoAn_ToanHoc.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                    )
-            except Exception as e:
-                st.error(f"Lỗi khi phân tích: {str(e)}")
