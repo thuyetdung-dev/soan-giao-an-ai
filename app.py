@@ -92,11 +92,21 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
 
     prompt = """
     Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint từ tài liệu gốc.
-    ĐỂ TRÁNH LỖI BẢN QUYỀN (RECITATION), BẮT BUỘC PHẢI THỰC HIỆN:
-    - KHÔNG chép phạt y nguyên định lý. Hãy chuyển hóa thành ngôn ngữ giảng dạy tương tác (Ví dụ: "Các em lưu ý quy tắc sau...", "Thầy có một ví dụ nhỏ...").
-    - Tự động bổ sung thêm các câu hỏi gợi mở, ghi chú sư phạm, hoặc ví dụ thực tế vào mỗi slide để làm mới hoàn toàn đoạn văn bản gốc.
-    - LƯU Ý JSON: Mọi công thức Toán học (LaTeX) chứa dấu gạch chéo ngược (\) BẮT BUỘC phải được nhân đôi thành (\\\\) (Ví dụ: \\\\frac, \\\\lim).
-    - Xuất ra DUY NHẤT định dạng JSON thuần:
+    
+    LƯU Ý TỐI QUAN TRỌNG VỀ ĐỊNH DẠNG TOÁN HỌC:
+    - TUYỆT ĐỐI KHÔNG SỬ DỤNG MÃ LATEX (không dùng $, $$, \\frac, \\lim, \\infty, \\in...).
+    - CHỈ SỬ DỤNG KÝ TỰ UNICODE VÀ TEXT THƯỜNG để trình bày công thức.
+    - Mẫu quy đổi bắt buộc:
+      + Mũ/Lũy thừa: Dùng x², x³ thay vì x^2, x^3. (Ví dụ: y = x³ - 3x² + 2)
+      + Ký hiệu đặc biệt: Dùng ∞ thay vì \\infty; Dùng ∈ thay vì \\in; Dùng ℝ, ≠, ≤, ≥, →, Δ.
+      + Phân số: Viết ngang kết hợp dấu ngoặc, ví dụ: (x² - 2x + 5)/(x - 1).
+      + Đạo hàm: Dùng y', f'(x).
+    
+    ĐỂ TRÁNH LỖI BẢN QUYỀN (RECITATION):
+    - KHÔNG chép phạt y nguyên sách giáo khoa. Hãy chuyển hóa thành ngôn ngữ giảng dạy tương tác (Ví dụ: "Các em lưu ý quy tắc...", "Thầy có một ví dụ...").
+    - Tự động bổ sung câu hỏi gợi mở, ghi chú sư phạm thực tế vào các slide.
+    
+    Xuất ra DUY NHẤT định dạng JSON thuần:
     {
         "tieu_de": "Tên bài học",
         "mon": "Toán học",
@@ -105,8 +115,8 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
             {
                 "tieu_de_slide": "Tiêu đề Slide",
                 "noi_dung": [
-                    "Câu hỏi dẫn dắt hoặc ghi chú...",
-                    "Nội dung kiến thức (đã được diễn giải lại)..."
+                    "Câu hỏi dẫn dắt...",
+                    "Kiến thức chứa công thức Unicode: y' = (x² - 2x - 3)/(x - 1)²"
                 ]
             }
         ]
