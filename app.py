@@ -6,17 +6,16 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 import docx
-
-# 1. ĐỔI SANG THƯ VIỆN GIỐNG HỆT APP GAME
 import google.generativeai as genai
 
 # CẤU HÌNH TRANG WEB
 st.set_page_config(page_title="Soạn PowerPoint Tự Động", layout="wide")
 st.title("📚 Trợ Lý Soạn Giáo Án PowerPoint Tự Động")
 
-# LẤY KHÓA TỪ SECRETS (Giống hệt app Game)
+# LẤY KHÓA VÀ QUÉT MÔ HÌNH
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
+    genai.configure(api_key=API_KEY)
 except:
     API_KEY = ""
     st.error("Chưa tìm thấy khóa API trong mục Secrets!")
@@ -25,8 +24,19 @@ with st.sidebar:
     st.header("⚙️ Cấu hình hệ thống")
     if API_KEY:
         st.success("✅ Đã nhận cấu hình API Key từ Secrets!")
+        try:
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            if available_models:
+                selected_model = st.selectbox("🤖 Chọn mô hình AI:", available_models)
+            else:
+                st.error("Tài khoản chưa được cấp quyền dùng AI.")
+                selected_model = None
+        except Exception as e:
+            st.error("Lỗi khi kết nối lấy danh sách AI.")
+            selected_model = None
     else:
         st.error("❌ Thiếu API Key!")
+        selected_model = None
 
 # 1. HÀM TẠO POWERPOINT TỰ ĐỘNG
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
@@ -35,7 +45,6 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
-    # Slide tiêu đề
     slide_title = prs.slides.add_slide(blank_layout)
     tx = slide_title.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
     p = tx.text_frame.paragraphs[0]
@@ -51,11 +60,9 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     p2.font.color.rgb = RGBColor(100, 100, 100)
     p2.alignment = PP_ALIGN.CENTER
 
-    # Các slide nội dung
     for item in noi_dung_bai_hoc.get("cac_slide", []):
         slide = prs.slides.add_slide(blank_layout)
         
-        # Tiêu đề slide
         t_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.6), Inches(11.7), Inches(0.8))
         p_t = t_box.text_frame.paragraphs[0]
         p_t.text = str(item.get("tieu_de_slide", ""))
@@ -63,7 +70,6 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
-        # Nội dung bullet
         c_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.8), Inches(11.7), Inches(5))
         tf_c = c_box.text_frame
         tf_c.word_wrap = True
@@ -79,8 +85,7 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     return file_ra
 
 # 2. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
-def phan_tich_tai_lieu_ai(file_tai_len, key):
-    genai.configure(api_key=key)
+def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
 
@@ -101,10 +106,7 @@ def phan_tich_tai_lieu_ai(file_tai_len, key):
     """
 
     if ten_file.endswith(".pdf"):
-        noi_dung_input = [
-            {"mime_type": "application/pdf", "data": file_bytes},
-            prompt
-        ]
+        noi_dung_input = [{"mime_type": "application/pdf", "data": file_bytes}, prompt]
     elif ten_file.endswith(".docx"):
         doc = docx.Document(io.BytesIO(file_bytes))
         text = "\n".join([p.text for p in doc.paragraphs if p.text])
@@ -113,7 +115,7 @@ def phan_tich_tai_lieu_ai(file_tai_len, key):
         text = file_bytes.decode("utf-8", errors="ignore")
         noi_dung_input = [f"Nội dung tài liệu:\n{text[:10000]}\n\n{prompt}"]
 
-    model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
+    model = genai.GenerativeModel(ai_model, generation_config={"response_mime_type": "application/json"})
     response = model.generate_content(noi_dung_input)
     return json.loads(response.text)
 
@@ -121,11 +123,11 @@ def phan_tich_tai_lieu_ai(file_tai_len, key):
 st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
 file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
 
-if file_tai_len:
+if file_tai_len and selected_model:
     if st.button("🚀 Bắt đầu soạn giáo án tự động"):
-        with st.spinner("AI đang đọc tài liệu và thiết kế giáo án... Thầy vui lòng chờ giây lát..."):
+        with st.spinner(f"AI ({selected_model}) đang đọc tài liệu và thiết kế giáo án... Thầy vui lòng chờ giây lát..."):
             try:
-                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, API_KEY)
+                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
                 file_ppt = xuat_powerpoint(du_lieu_json)
                 st.success("🎉 Đã soạn xong bài giảng PowerPoint!")
 
