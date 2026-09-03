@@ -88,13 +88,12 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
 def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
-
-    prompt = """
-    Bạn là một chuyên gia sư phạm. Hãy đọc thật kỹ, trích xuất ĐẦY ĐỦ và CHI TIẾT toàn bộ nội dung từ tài liệu được cung cấp để thiết kế một bài giảng PowerPoint hoàn chỉnh.
+prompt = """
+    Bạn là một chuyên gia sư phạm. Hãy đọc tài liệu được cung cấp và biên soạn một bài giảng PowerPoint chi tiết.
     Yêu cầu bắt buộc:
-    - KHÔNG được tóm tắt qua loa hay cắt xén nội dung quan trọng. 
-    - Bài giảng có thể kéo dài từ 10 đến 25 slide tùy vào độ dài và độ sâu của tài liệu gốc.
-    - Mỗi slide cần có các ý diễn giải chi tiết, đầy đủ câu chữ (4-7 ý/slide) để giáo viên có thể trực tiếp giảng dạy.
+    - Phân tích sâu và diễn đạt lại nội dung bằng ngôn ngữ giảng dạy của riêng bạn (KHÔNG sao chép y nguyên từng chữ của tài liệu gốc để tránh lỗi bản quyền).
+    - Bài giảng cần chi tiết, khai thác triệt để nội dung, chia thành nhiều slide (khoảng 10-25 slide tùy độ dài tài liệu).
+    - Mỗi slide chứa 4-7 gạch đầu dòng. Các ý phải được viết lại mạch lạc, dễ hiểu, phù hợp để trình chiếu cho học sinh.
     - Xuất ra DUY NHẤT định dạng JSON thuần (không kèm văn bản giải thích nào khác) theo mẫu sau:
     {
         "tieu_de": "Tên bài học chi tiết",
@@ -104,17 +103,16 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
             {
                 "tieu_de_slide": "Tiêu đề Slide (Rõ ràng, cụ thể)",
                 "noi_dung": [
-                    "Nội dung chi tiết 1 (đầy đủ ý nghĩa)", 
-                    "Nội dung chi tiết 2...", 
-                    "Nội dung chi tiết 3...", 
-                    "Nội dung chi tiết 4..."
+                    "Ý giảng dạy 1 (đã được diễn đạt lại mạch lạc)", 
+                    "Ý giảng dạy 2...", 
+                    "Ý giảng dạy 3...", 
+                    "Ý giảng dạy 4..."
                 ]
             }
         ]
     }
     """
-
-    if ten_file.endswith(".pdf"):
+       if ten_file.endswith(".pdf"):
         noi_dung_input = [{"mime_type": "application/pdf", "data": file_bytes}, prompt]
     elif ten_file.endswith(".docx"):
         doc = docx.Document(io.BytesIO(file_bytes))
