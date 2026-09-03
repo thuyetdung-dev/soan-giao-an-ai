@@ -1,5 +1,6 @@
 import json
 import io
+import re
 import streamlit as st
 import matplotlib.pyplot as plt
 from pptx import Presentation
@@ -27,7 +28,9 @@ with st.sidebar:
         try:
             available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             if available_models:
-                selected_model = st.selectbox("🤖 Chọn mô hình AI:", available_models)
+                # Đặt mặc định là mô hình mạnh để tránh lỗi JSON
+                default_index = available_models.index('gemini-1.5-pro') if 'gemini-1.5-pro' in available_models else 0
+                selected_model = st.selectbox("🤖 Chọn mô hình AI:", available_models, index=default_index)
             else:
                 st.error("Tài khoản chưa được cấp quyền dùng AI.")
                 selected_model = None
@@ -38,7 +41,7 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
-# HÀM VẼ BẢNG BIẾN THIÊN TỰ ĐỘNG SỬA LỖI TOÁN HỌC
+# HÀM VẼ BẢNG BIẾN THIÊN TỰ ĐỘNG
 def tao_anh_bbt(bbt_data):
     x_data = bbt_data.get("x", [])
     y_phay_data = bbt_data.get("y_phay", [])
@@ -50,7 +53,6 @@ def tao_anh_bbt(bbt_data):
     fig, ax = plt.subplots(figsize=(n * 1.2, 3))
     ax.axis('off')
     
-    # Kẻ khung cơ bản
     ax.plot([0, n+1], [2, 2], color='black', lw=1.2)
     ax.plot([0, n+1], [1, 1], color='black', lw=1.2)
     ax.plot([1, 1], [0, 3], color='black', lw=1.2)
@@ -65,7 +67,6 @@ def tao_anh_bbt(bbt_data):
         if i < len(x_data) and x_data[i]: 
             ax.text(col_x, 2.5, str(x_data[i]), ha='center', va='center', fontsize=15)
             
-        # Lấy dấu đạo hàm xung quanh để tính toán độ dốc
         left_sign = str(y_phay_data[i-1]).strip() if i > 0 and i-1 < len(y_phay_data) else ""
         right_sign = str(y_phay_data[i+1]).strip() if i+1 < len(y_phay_data) else ""
         
@@ -80,14 +81,11 @@ def tao_anh_bbt(bbt_data):
         if i < len(y_val_data) and y_val_data[i]:
             val_y = str(y_val_data[i]).strip()
             
-            # ÉP TỌA ĐỘ TOÁN HỌC THEO DẤU ĐẠO HÀM (Vượt qua ảo giác AI)
             if "||" in val_y:
                 parts = val_y.split("||")
                 if len(parts) == 2:
                     p1, p2 = parts[0].strip(), parts[1].strip()
-                    # Nếu trước || là "-", đồ thị lao xuống đáy. Nếu "+", lao lên đỉnh.
                     pos1 = 0.15 if left_sign == "-" else 0.85
-                    # Nếu sau || là "-", đồ thị bắt đầu từ đỉnh. Nếu "+", từ đáy.
                     pos2 = 0.85 if right_sign == "-" else 0.15
                     
                     ax.text(col_x - 0.25, pos1, p1, ha='right', va='center', fontsize=14)
@@ -96,27 +94,24 @@ def tao_anh_bbt(bbt_data):
                     y_coords.append((col_x + 0.25, pos2))
                     continue
 
-            # Các điểm cực trị và mút bình thường
-            if left_sign == "+" or right_sign == "-": pos = 0.85  # Cực đại
-            elif left_sign == "-" or right_sign == "+": pos = 0.15 # Cực tiểu
+            if left_sign == "+" or right_sign == "-": pos = 0.85
+            elif left_sign == "-" or right_sign == "+": pos = 0.15
             else: pos = 0.5
             
-            # Xử lý vô cực ở mút ngoài cùng
             if i == 0: pos = 0.15 if right_sign == "+" else 0.85
             if i == n - 1: pos = 0.85 if left_sign == "+" else 0.15
 
             y_coords.append((col_x, pos))
             ax.text(col_x, pos, val_y, ha='center', va='center', fontsize=15)
     
-    # Vẽ mũi tên kết nối liên tục
     for i in range(len(y_coords)-1):
         x1, y1 = y_coords[i]
         x2, y2 = y_coords[i+1]
         
-        if abs(x2 - x1) < 0.6: continue # Bỏ qua nét vẽ cắt ngang vách ||
+        if abs(x2 - x1) < 0.6: continue
         
         dx, dy = x2 - x1, y2 - y1
-        sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0.01) # Tránh lỗi chia 0
+        sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0.01)
         shrink_x, shrink_y = 0.2, 0.2
         
         ax.annotate("", xy=(x2 - shrink_x, y2 - shrink_y * sign_y), 
@@ -191,25 +186,28 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     ten_file = file_tai_len.name.lower()
 
     prompt = """
-    Bạn là chuyên gia sư phạm Toán. Thiết kế bài giảng PowerPoint chi tiết.
+    Bạn là chuyên gia sư phạm Toán học cấp THPT. Đọc TOÀN BỘ tài liệu được cung cấp và biên soạn giáo án PowerPoint.
     
-    LƯU Ý ĐỊNH DẠNG:
-    - BẮT BUỘC Tách nhỏ nội dung: Mỗi khái niệm, định lý hoặc một ví dụ giải bài tập phải độc lập trên 1 slide riêng biệt.
-    - Tính toán Toán học CHÍNH XÁC TUYỆT ĐỐI, đặc biệt là giới hạn (lim) của hàm phân thức tại tiệm cận đứng.
-    - Dùng Unicode (x₁, x₂, ∞, ∈, ℝ, phân số viết ngang a/b). Không dùng LaTeX.
+    CẢNH BÁO TỐI QUAN TRỌNG VỀ LỖI JSON (KHỬ ĐỘC LATEX):
+    - Tài liệu gốc có chứa nhiều mã LaTeX (ví dụ: \\vec{AB}, \\sqrt{}, \\circ). 
+    - BẠN TUYỆT ĐỐI KHÔNG ĐƯỢC GIỮ LẠI DẤU GẠCH CHÉO NGƯỢC (\\) TRONG KẾT QUẢ ĐẦU RA JSON. Nó sẽ làm sập hệ thống.
+    - HÃY DỊCH LATEX SANG VĂN BẢN THƯỜNG: Ví dụ: Dịch \\vec{AB} thành "vectơ AB", dịch \\sqrt{13} thành "căn 13", độ thành "độ". Dùng ký hiệu Unicode x₁, x₂, ∞, ∈, ℝ, phân số a/b.
     
-    LƯU Ý VỀ BẢNG BIẾN THIÊN:
-    - Cung cấp 3 mảng dữ liệu CÙNG ĐỘ DÀI: "x", "y_phay", "y_val".
-    - Các khoảng xen kẽ giữa các nghiệm hãy để khoảng trắng "". 
-    - Tại điểm không xác định dùng "||". Tại dòng y, tách giới hạn 2 bên bằng "||".
-    - Ví dụ hàm số y = (x² - 2x + 5)/(x - 1) với y'=0 tại -1 và 3, không xác định tại 1:
-        "bang_bien_thien": {
-            "x":      ["-∞", "", "-1", "", "1", "", "3", "", "+∞"],
-            "y_phay": ["", "+", "0", "-", "||", "-", "0", "+", ""],
-            "y_val":  ["-∞", "", "-4", "", "-∞ || +∞", "", "4", "", "+∞"]
-        }
+    LỆNH KỶ LUẬT:
+    1. BẮT BUỘC tạo ra từ 15-25 slide. Mỗi bài toán, định lý hoặc ví dụ phải nằm trên 1 slide độc lập. ĐỪNG CẮT XÉN NỘI DUNG.
     
-    Xuất ra DUY NHẤT JSON thuần.
+    ĐỊNH DẠNG ĐẦU RA (Chỉ xuất JSON thuần, KHÔNG có thẻ markdown):
+    {
+        "tieu_de": "Tên bài học trích từ tài liệu",
+        "mon": "Toán học",
+        "giao_vien": "Hồ Thuyết Dũng",
+        "cac_slide": [
+            {
+                "tieu_de_slide": "Ví dụ về Vectơ Không gian",
+                "noi_dung": ["Ta có vectơ AB = ... (đã dịch từ mã latex)"]
+            }
+        ]
+    }
     """
 
     if ten_file.endswith(".pdf"):
@@ -226,30 +224,19 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     response = model.generate_content(noi_dung_input)
     
     raw_json = response.text
+    
+    # BỘ LỌC CỨNG: ÉP TÌM ĐÚNG VÙNG JSON, LOẠI BỎ MỌI KÝ TỰ RÁC VÀ DẤU \ LATEX CÒN SÓT
     try:
-        return json.loads(raw_json, strict=False)
-    except Exception:
+        # Bắt chính xác đoạn JSON bắt đầu bằng { và kết thúc bằng }
+        match = re.search(r'\{.*\}', raw_json, re.DOTALL)
+        if match:
+            clean_json = match.group(0)
+            # Khử toàn bộ dấu gạch chéo ngược LaTeX bị lọt lưới
+            clean_json = clean_json.replace('\\', '\\\\')
+            return json.loads(clean_json, strict=False)
+        else:
+            raise ValueError("Không tìm thấy cấu trúc JSON")
+    except Exception as e:
+        # Phương án dự phòng cuối cùng
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
-
-# GIAO DIỆN CHÍNH
-st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
-file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
-
-if file_tai_len and selected_model:
-    if st.button("🚀 Bắt đầu soạn giáo án tự động"):
-        with st.spinner(f"AI ({selected_model}) đang thiết kế giáo án và vẽ đồ họa bảng biến thiên..."):
-            try:
-                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
-                file_ppt = xuat_powerpoint(du_lieu_json)
-                st.success("🎉 Đã soạn xong bài giảng PowerPoint!")
-
-                with open(file_ppt, "rb") as f:
-                    st.download_button(
-                        label="📥 Tải bài giảng về máy (.pptx)",
-                        data=f,
-                        file_name="GiaoAn_ToanHoc.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                    )
-            except Exception as e:
-                st.error(f"Lỗi khi phân tích: {str(e)}")
