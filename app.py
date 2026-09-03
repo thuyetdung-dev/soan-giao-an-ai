@@ -1,19 +1,16 @@
 import json
 import io
-import re
 import streamlit as st
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 import docx
 import google.generativeai as genai
 
-# CẤU HÌNH TRANG WEB
 st.set_page_config(page_title="Soạn PowerPoint Tự Động", layout="wide")
 st.title("📚 Trợ Lý Soạn Giáo Án PowerPoint Tự Động")
 
-# LẤY KHÓA VÀ QUÉT MÔ HÌNH
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
@@ -39,7 +36,6 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
-# 1. HÀM TẠO POWERPOINT TỰ ĐỘNG
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -64,14 +60,17 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     for item in noi_dung_bai_hoc.get("cac_slide", []):
         slide = prs.slides.add_slide(blank_layout)
         
-        t_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.6), Inches(11.7), Inches(0.8))
+        t_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.7), Inches(0.8))
         p_t = t_box.text_frame.paragraphs[0]
         p_t.text = str(item.get("tieu_de_slide", ""))
         p_t.font.size = Pt(28)
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
-        c_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.8), Inches(11.7), Inches(5))
+        bbt = item.get("bang_bien_thien")
+        chieu_cao_chu_thich = Inches(5) if not bbt else Inches(3)
+        
+        c_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.4), Inches(11.7), chieu_cao_chu_thich)
         tf_c = c_box.text_frame
         tf_c.word_wrap = True
         
@@ -80,44 +79,66 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
             p_c.text = f"• {bullet}"
             p_c.font.size = Pt(20)
             p_c.font.color.rgb = RGBColor(50, 50, 50)
-            p_c.space_after = Pt(14)
+            p_c.space_after = Pt(10)
+
+        # Module tự động kẻ Bảng Biến Thiên
+        if bbt and isinstance(bbt, dict):
+            hang_x = bbt.get("x", [])
+            hang_y_phay = bbt.get("y_phay", [])
+            hang_y = bbt.get("y", [])
+            
+            so_cot = len(hang_x)
+            if so_cot > 0:
+                top_table = Inches(4.5)
+                table_shape = slide.shapes.add_table(3, so_cot, Inches(1), top_table, Inches(11.333), Inches(2.2))
+                table = table_shape.table
+                
+                du_lieu_bang = [hang_x, hang_y_phay, hang_y]
+                
+                for r_idx, hang_du_lieu in enumerate(du_lieu_bang):
+                    for c_idx, gia_tri in enumerate(hang_du_lieu):
+                        if c_idx < so_cot:
+                            cell = table.cell(r_idx, c_idx)
+                            cell.text = str(gia_tri)
+                            
+                            p_cell = cell.text_frame.paragraphs[0]
+                            p_cell.font.size = Pt(22)
+                            p_cell.font.bold = True if c_idx == 0 else False
+                            p_cell.alignment = PP_ALIGN.CENTER
+                            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
 
     prs.save(file_ra)
     return file_ra
 
-# 2. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
 def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
 
     prompt = """
-    Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint từ tài liệu gốc.
+    Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint chi tiết.
     
-    LƯU Ý TỐI QUAN TRỌNG VỀ ĐỊNH DẠNG TOÁN HỌC:
-    - TUYỆT ĐỐI KHÔNG SỬ DỤNG MÃ LATEX (không dùng $, $$, \\frac, \\lim, \\infty, \\in...).
-    - CHỈ SỬ DỤNG KÝ TỰ UNICODE VÀ TEXT THƯỜNG để trình bày công thức.
-    - Mẫu quy đổi bắt buộc:
-      + Mũ/Lũy thừa: Dùng x², x³ thay vì x^2, x^3. (Ví dụ: y = x³ - 3x² + 2)
-      + Ký hiệu đặc biệt: Dùng ∞ thay vì \\infty; Dùng ∈ thay vì \\in; Dùng ℝ, ≠, ≤, ≥, →, Δ.
-      + Phân số: Viết ngang kết hợp dấu ngoặc, ví dụ: (x² - 2x + 5)/(x - 1).
-      + Đạo hàm: Dùng y', f'(x).
+    LƯU Ý VỀ ĐỊNH DẠNG TOÁN:
+    - KHÔNG DÙNG MÃ LATEX. CHỈ DÙNG UNICODE (x², ∞, ∈, ≠, →, phân số viết ngang a/b).
     
-    ĐỂ TRÁNH LỖI BẢN QUYỀN (RECITATION):
-    - KHÔNG chép phạt y nguyên sách giáo khoa. Hãy chuyển hóa thành ngôn ngữ giảng dạy tương tác (Ví dụ: "Các em lưu ý quy tắc...", "Thầy có một ví dụ...").
-    - Tự động bổ sung câu hỏi gợi mở, ghi chú sư phạm thực tế vào các slide.
+    LƯU Ý VỀ BẢNG BIẾN THIÊN (MODULE MỚI):
+    - Khi giảng về đơn điệu, cực trị, nếu cần thiết hãy cung cấp dữ liệu để hệ thống vẽ bảng.
+    - Dữ liệu này đặt trong key "bang_bien_thien" (nếu slide không cần bảng thì không trả về key này hoặc để null).
+    - "bang_bien_thien" gồm 3 mảng tọa độ: "x", "y_phay", "y".
     
-    Xuất ra DUY NHẤT định dạng JSON thuần:
+    Xuất ra DUY NHẤT JSON thuần theo mẫu:
     {
         "tieu_de": "Tên bài học",
         "mon": "Toán học",
         "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Tiêu đề Slide",
-                "noi_dung": [
-                    "Câu hỏi dẫn dắt...",
-                    "Kiến thức chứa công thức Unicode: y' = (x² - 2x - 3)/(x - 1)²"
-                ]
+                "tieu_de_slide": "Ví dụ: Xét tính đơn điệu",
+                "noi_dung": ["Hàm số có tập xác định D = ℝ", "Đạo hàm y' = ..."],
+                "bang_bien_thien": {
+                    "x": ["x", "-∞", "1", "3", "+∞"],
+                    "y_phay": ["y'", "+", "0", "-", "0", "+"],
+                    "y": ["y", "-∞", "34", "30", "+∞"]
+                }
             }
         ]
     }
@@ -136,24 +157,19 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     model = genai.GenerativeModel(ai_model, generation_config={"response_mime_type": "application/json"})
     response = model.generate_content(noi_dung_input)
     
-    # Bộ lọc sửa lỗi JSON do công thức Toán học gây ra
     raw_json = response.text
     try:
         return json.loads(raw_json, strict=False)
     except Exception:
         fixed_json = raw_json.replace('\\', '\\\\')
-        fixed_json = fixed_json.replace('\\\\"', '\\"')
-        fixed_json = fixed_json.replace('\\\\n', '\\n')
-        fixed_json = fixed_json.replace('\\\\t', '\\t')
         return json.loads(fixed_json, strict=False)
 
-# GIAO DIỆN CHÍNH
 st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
 file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
 
 if file_tai_len and selected_model:
     if st.button("🚀 Bắt đầu soạn giáo án tự động"):
-        with st.spinner(f"AI ({selected_model}) đang đọc tài liệu và thiết kế giáo án... Thầy vui lòng chờ giây lát..."):
+        with st.spinner(f"AI ({selected_model}) đang thiết kế giáo án và kẻ bảng biến thiên..."):
             try:
                 du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
                 file_ppt = xuat_powerpoint(du_lieu_json)
@@ -161,9 +177,9 @@ if file_tai_len and selected_model:
 
                 with open(file_ppt, "rb") as f:
                     st.download_button(
-                        label="📥 Bấm vào đây để tải bài giảng về máy (.pptx)",
+                        label="📥 Tải bài giảng về máy (.pptx)",
                         data=f,
-                        file_name="GiaoAn_SoanTuDong.pptx",
+                        file_name="GiaoAn_ToanHoc_CoBangBienThien.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
             except Exception as e:
