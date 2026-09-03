@@ -29,7 +29,7 @@ with st.sidebar:
             available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             if available_models:
                 # Đặt mặc định là mô hình mạnh để tránh lỗi JSON
-                default_index = available_models.index('gemini-1.5-pro') if 'gemini-1.5-pro' in available_models else 0
+                default_index = available_models.index('models/gemini-1.5-flash') if 'models/gemini-1.5-flash' in available_models else 0
                 selected_model = st.selectbox("🤖 Chọn mô hình AI:", available_models, index=default_index)
             else:
                 st.error("Tài khoản chưa được cấp quyền dùng AI.")
@@ -224,19 +224,39 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     response = model.generate_content(noi_dung_input)
     
     raw_json = response.text
+    raw_json = re.sub(r'```(?:json)?', '', raw_json).strip()
+    raw_json = re.sub(r'```', '', raw_json).strip()
     
-    # BỘ LỌC CỨNG: ÉP TÌM ĐÚNG VÙNG JSON, LOẠI BỎ MỌI KÝ TỰ RÁC VÀ DẤU \ LATEX CÒN SÓT
     try:
-        # Bắt chính xác đoạn JSON bắt đầu bằng { và kết thúc bằng }
         match = re.search(r'\{.*\}', raw_json, re.DOTALL)
         if match:
             clean_json = match.group(0)
-            # Khử toàn bộ dấu gạch chéo ngược LaTeX bị lọt lưới
             clean_json = clean_json.replace('\\', '\\\\')
             return json.loads(clean_json, strict=False)
         else:
             raise ValueError("Không tìm thấy cấu trúc JSON")
     except Exception as e:
-        # Phương án dự phòng cuối cùng
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
+
+# GIAO DIỆN CHÍNH
+st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
+file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
+
+if file_tai_len and selected_model:
+    if st.button("🚀 Bắt đầu soạn giáo án tự động"):
+        with st.spinner(f"AI ({selected_model}) đang thiết kế giáo án và vẽ đồ họa..."):
+            try:
+                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
+                file_ppt = xuat_powerpoint(du_lieu_json)
+                st.success("🎉 Đã soạn xong bài giảng PowerPoint!")
+
+                with open(file_ppt, "rb") as f:
+                    st.download_button(
+                        label="📥 Tải bài giảng về máy (.pptx)",
+                        data=f,
+                        file_name="GiaoAn_ToanHoc.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+            except Exception as e:
+                st.error(f"Lỗi khi phân tích: {str(e)}")
