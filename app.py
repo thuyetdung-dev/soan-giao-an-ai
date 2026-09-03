@@ -14,15 +14,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 from docx import Document
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1 (Hybrid Stable)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -79,13 +78,6 @@ def extract_docx(data: bytes) -> str:
         for row in table.rows:
             cells = [clean_text(cell.text) for cell in row.cells]
             parts.append(" | ".join(cells))
-    for section in doc.sections:
-        for paragraph in section.header.paragraphs:
-            if paragraph.text.strip():
-                parts.append("[ĐẦU TRANG] " + paragraph.text.strip())
-        for paragraph in section.footer.paragraphs:
-            if paragraph.text.strip():
-                parts.append("[CHÂN TRANG] " + paragraph.text.strip())
     return "\n".join(parts)
 
 def read_source(uploaded_file) -> tuple[str, bytes, str]:
@@ -295,60 +287,53 @@ def validate_lesson(data: Any) -> dict[str, Any]:
 def build_prompt(config: LessonConfig) -> str:
     answer_rule = "Có thể cung cấp đáp án ở trường answer." if config.include_answers else "Trường answer luôn để trống."
     return f"""
-Bạn là tổ trưởng chuyên môn Toán THPT, chuyên gia Chương trình GDPT 2018 và thiết kế PowerPoint sư phạm.
-Hãy dùng tài liệu nguồn làm căn cứ chính, không bịa định lý, số liệu, ví dụ hoặc đáp án. Nếu nguồn thiếu, chỉ bổ sung kiến thức Toán THPT phổ biến và phải tự kiểm tra tính đúng đắn.
-
-THÔNG TIN BÀI DẠY:
+Bạn là chuyên gia Toán THPT. Viết bài giảng bám sát cấu trúc GDPT 2018 (5 hoạt động).
 - Bài: {config.lesson or 'Tự xác định từ tài liệu'}
-- Lớp: {config.grade}; bộ sách: {config.book}; thời lượng: {config.periods} tiết.
-- Đối tượng: {config.student_level}; dự kiến {config.slide_count} slide.
-
-YÊU CẦU SƯ PHẠM:
-- Mở đầu bằng mục tiêu ngắn gọn, kiến thức trọng tâm và lộ trình bài học.
-- Tổ chức theo 5 hoạt động: KHỞI ĐỘNG, HÌNH THÀNH KIẾN THỨC, LUYỆN TẬP, VẬN DỤNG, CỦNG CỐ.
-- Mỗi slide có một thông điệp chính, tối đa 6 gạch đầu dòng, câu chữ ngắn để trình chiếu.
-- Có câu hỏi gợi mở, ví dụ mẫu, bài tập phân hóa và câu hỏi kiểm tra nhanh.
-- Với bài tập, kiểm tra lại đáp án trước khi xuất. {answer_rule}
-- Công thức viết bằng Unicode dễ đọc: √, ∈, ℝ, ≤, ≥, ⇒, x². Phân số ngắn có thể dùng a/b. Không để mã LaTeX hoặc dấu $.
-- Không đưa thông tin cá nhân học sinh vào bài giảng.
-
+- Đối tượng: {config.student_level}; Số slide dự kiến: {config.slide_count}
+Mỗi slide có tối đa 6 gạch đầu dòng ngắn gọn. {answer_rule}
 ĐỒ HỌA TÙY CHỌN:
-- graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}.
-  Chỉ dùng x, số, + - * / ** và các hàm sin, cos, tan, sqrt, abs, exp, log.
+- graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
 - variation_table: {{"points":["-∞","-1","1","+∞"], "interval_signs":["+","-","+"], "values":["-∞","2","-2","+∞"]}}.
-- Mỗi slide chỉ nên có tối đa một đồ họa.
-
-Trả về JSON hợp lệ duy nhất theo cấu trúc:
+Trả về duy nhất JSON chuẩn:
 {{
   "title":"Tên bài học",
   "slides":[{{
     "title":"Tiêu đề slide",
-    "activity":"KHỞI ĐỘNG",
-    "bullets":["Ý ngắn 1","Ý ngắn 2"],
-    "answer":"Đáp án hoặc để trống",
-    "teacher_note":"Gợi ý tổ chức cho giáo viên",
+    "activity":"HÌNH THÀNH KIẾN THỨC",
+    "bullets":["Ý 1","Ý 2"],
+    "answer":"",
+    "teacher_note":"",
     "graph":null,
     "variation_table":null
   }}]
 }}
 """
 
-def generate_lesson(client: genai.Client, model: str, source_text: str, source_bytes: bytes,
-                    source_type: str, config: LessonConfig) -> dict[str, Any]:
+def generate_lesson(model_name: str, source_text: str, source_bytes: bytes, source_type: str, config: LessonConfig) -> dict[str, Any]:
     prompt = build_prompt(config)
-    contents: list[Any]
     if source_type == "pdf":
-        contents = [types.Part.from_bytes(data=source_bytes, mime_type="application/pdf"), prompt]
+        contents = [{"mime_type": "application/pdf", "data": source_bytes}, prompt]
     else:
         contents = [f"TÀI LIỆU NGUỒN:\n{source_text}\n\n{prompt}"]
-    response = client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.25),
-    )
+    
+    model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json", "temperature": 0.25})
+    response = model.generate_content(contents)
+    
     if not response.text:
         raise ValueError("AI không trả về nội dung. Vui lòng thử lại.")
-    return validate_lesson(json.loads(response.text))
+        
+    raw_json = response.text
+    raw_json = re.sub(r'```(?:json)?', '', raw_json).strip()
+    raw_json = re.sub(r'```', '', raw_json).strip()
+    
+    try:
+        match = re.search(r'\{.*\}', raw_json, re.DOTALL)
+        if match:
+            clean_json = match.group(0).replace('\\', '\\\\')
+            return validate_lesson(json.loads(clean_json, strict=False))
+        return validate_lesson(json.loads(raw_json))
+    except Exception:
+        return validate_lesson(json.loads(raw_json.replace('\\', '\\\\'), strict=False))
 
 def add_full_background(slide, color: tuple[int, int, int]) -> None:
     shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(7.5))
@@ -480,13 +465,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 st.title("📐 Trợ lý soạn PowerPoint Toán THPT")
-st.caption(f"Phiên bản {APP_VERSION} • Tạo bài giảng theo định hướng GDPT 2018 • Không lưu tài liệu sau phiên làm việc")
+st.caption(f"Phiên bản {APP_VERSION} • Đồ họa Toán học AST • Kết nối API Tối ưu")
 
 api_key = get_api_key()
 if not api_key:
     st.error("Chưa cấu hình GEMINI_API_KEY trong Secrets. Xem tệp README để thiết lập.")
     st.stop()
 
+# KHÔI PHỤC MENU CHỌN MÔ HÌNH THÔNG MINH BÊN TRÁI
 with st.sidebar:
     st.header("Thông tin bài dạy")
     teacher = st.text_input("Tên giáo viên", placeholder="Nguyễn Văn A")
@@ -500,6 +486,20 @@ with st.sidebar:
     theme_name = st.selectbox("Phong cách", list(THEMES))
     include_answers = st.checkbox("Đưa đáp án/gợi ý vào slide", True)
     include_notes = st.checkbox("Tạo ghi chú dành cho giáo viên", True)
+    
+    st.markdown("---")
+    # Menu AI Tự Động Quét Khóa
+    try:
+        genai.configure(api_key=api_key)
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        if available_models:
+            default_index = available_models.index('models/gemini-1.5-flash') if 'models/gemini-1.5-flash' in available_models else 0
+            selected_model = st.selectbox("🤖 Chọn mô hình AI:", available_models, index=default_index)
+        else:
+            st.error("Khóa API không có quyền truy cập.")
+            selected_model = None
+    except Exception:
+        selected_model = "models/gemini-1.5-flash"
 
 st.subheader("1. Tải tài liệu nguồn")
 uploaded = st.file_uploader("PDF, Word hoặc TXT (tối đa 20 MB)", type=["pdf", "docx", "txt"])
@@ -511,12 +511,10 @@ if st.button("🚀 Phân tích và tạo PowerPoint", type="primary", use_contai
         config = LessonConfig(teacher, school, grade, book, lesson, int(periods), student_level,
                               int(slide_count), theme_name, include_answers, include_notes)
         source_text, source_bytes, source_type = read_source(uploaded)
-        client = genai.Client(api_key=api_key)
         
         with st.status("Đang soạn bài giảng…", expanded=True) as status:
             st.write("Đang đọc và cấu trúc hóa tài liệu nguồn…")
-            # Chỉ định đích danh mô hình Flash chuẩn xác với khóa API của thầy
-            lesson_data = generate_lesson(client, "gemini-1.5-flash", source_text, source_bytes, source_type, config)
+            lesson_data = generate_lesson(selected_model, source_text, source_bytes, source_type, config)
             
             st.write("Đang kiểm tra nội dung và dựng PowerPoint…")
             pptx_bytes = build_pptx(lesson_data, config)
@@ -524,20 +522,14 @@ if st.button("🚀 Phân tích và tạo PowerPoint", type="primary", use_contai
             
         safe_name = re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+", "_", lesson_data.get("title") or "Bai_giang_Toan").strip("_")
         filename = f"{safe_name[:70]}_{uuid.uuid4().hex[:6]}.pptx"
-        st.success(f"Đã tạo {len(lesson_data['slides'])} nội dung slide. Nội dung dài sẽ được tự chia trang khi xuất.")
+        st.success(f"Đã tạo {len(lesson_data['slides'])} slide. Các ý dài đã được cắt trang tự động.")
         st.download_button("📥 Tải PowerPoint", pptx_bytes, filename,
                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                            use_container_width=True)
                            
-        with st.expander("Xem danh mục slide"):
-            for i, item in enumerate(lesson_data["slides"], 1):
-                st.write(f"{i}. **{item['title']}** — {item['activity'].title()}")
-                
     except json.JSONDecodeError:
         st.error("AI trả về dữ liệu chưa đúng định dạng. Vui lòng bấm tạo lại.")
     except ValueError as exc:
         st.error(str(exc))
     except Exception as e:
-        # Bắt và hiển thị lỗi chi tiết để dễ kiểm tra
-        st.error(f"Lỗi hệ thống chi tiết: {str(e)}")
-        st.error("Không thể hoàn tất bài giảng. Hãy kiểm tra tài liệu, khóa API và thử lại.")
+        st.error(f"Lỗi: {str(e)}")
