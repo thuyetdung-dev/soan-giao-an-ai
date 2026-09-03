@@ -285,11 +285,9 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     
     raw_json = response.text
     
-    # Sửa lỗi ngắt dòng Regex an toàn trên 1 dòng
-    raw_json = re.sub(r'
-```(?:json)?', '', raw_json).strip()
-    raw_json = re.sub(r'
-```', '', raw_json).strip()
+    # Sửa lỗi Regex hoàn toàn nằm trên 1 dòng duy nhất
+    raw_json = re.sub(r'```(?:json)?', '', raw_json).strip()
+    raw_json = re.sub(r'```', '', raw_json).strip()
     
     try:
         match = re.search(r'\{.*\}', raw_json, re.DOTALL)
@@ -302,3 +300,25 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     except Exception as e:
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
+
+# GIAO DIỆN CHÍNH
+st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
+file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
+
+if file_tai_len and selected_model:
+    if st.button("🚀 Bắt đầu soạn giáo án tự động"):
+        with st.spinner(f"AI ({selected_model}) đang thiết kế giáo án và vẽ đồ họa..."):
+            try:
+                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
+                file_ppt = xuat_powerpoint(du_lieu_json)
+                st.success("🎉 Đã soạn xong bài giảng PowerPoint!")
+
+                with open(file_ppt, "rb") as f:
+                    st.download_button(
+                        label="📥 Tải bài giảng về máy (.pptx)",
+                        data=f,
+                        file_name="GiaoAn_ToanHoc.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+            except Exception as e:
+                st.error(f"Lỗi khi phân tích: {str(e)}")
