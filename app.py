@@ -1,5 +1,6 @@
 import json
 import io
+import re
 import streamlit as st
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -92,10 +93,11 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     prompt = """
     Bạn là một chuyên gia sư phạm. Hãy đọc tài liệu được cung cấp và biên soạn một bài giảng PowerPoint chi tiết.
     Yêu cầu bắt buộc:
-    - Phân tích sâu và diễn đạt lại nội dung bằng ngôn ngữ giảng dạy của riêng bạn (KHÔNG sao chép y nguyên từng chữ của tài liệu gốc để tránh lỗi bản quyền).
-    - Bài giảng cần chi tiết, khai thác triệt để nội dung, chia thành nhiều slide (khoảng 10-25 slide tùy độ dài tài liệu).
-    - Mỗi slide chứa 4-7 gạch đầu dòng. Các ý phải được viết lại mạch lạc, dễ hiểu, phù hợp để trình chiếu cho học sinh.
-    - Xuất ra DUY NHẤT định dạng JSON thuần (không kèm văn bản giải thích nào khác) theo mẫu sau:
+    - Phân tích sâu và diễn đạt lại nội dung bằng ngôn ngữ giảng dạy của riêng bạn (KHÔNG sao chép y nguyên).
+    - LƯU Ý JSON TỐI QUAN TRỌNG: Mọi công thức Toán học (LaTeX) chứa dấu gạch chéo ngược (\) BẮT BUỘC phải được nhân đôi thành (\\\\) (Ví dụ: \\\\frac, \\\\lim, \\\\sin). Nếu không tệp JSON sẽ bị hỏng.
+    - Bài giảng cần chi tiết, chia thành nhiều slide (khoảng 10-25 slide tùy độ dài tài liệu).
+    - Mỗi slide chứa 4-7 gạch đầu dòng mạch lạc.
+    - Xuất ra DUY NHẤT định dạng JSON thuần theo mẫu sau:
     {
         "tieu_de": "Tên bài học chi tiết",
         "mon": "Môn học",
@@ -104,10 +106,8 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
             {
                 "tieu_de_slide": "Tiêu đề Slide (Rõ ràng, cụ thể)",
                 "noi_dung": [
-                    "Ý giảng dạy 1 (đã được diễn đạt lại mạch lạc)", 
-                    "Ý giảng dạy 2...", 
-                    "Ý giảng dạy 3...", 
-                    "Ý giảng dạy 4..."
+                    "Ý giảng dạy 1", 
+                    "Ý giảng dạy 2 chứa công thức \\\\frac{a}{b}"
                 ]
             }
         ]
@@ -126,7 +126,17 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
 
     model = genai.GenerativeModel(ai_model, generation_config={"response_mime_type": "application/json"})
     response = model.generate_content(noi_dung_input)
-    return json.loads(response.text)
+    
+    # Bộ lọc sửa lỗi JSON do công thức Toán học gây ra
+    raw_json = response.text
+    try:
+        return json.loads(raw_json, strict=False)
+    except Exception:
+        fixed_json = raw_json.replace('\\', '\\\\')
+        fixed_json = fixed_json.replace('\\\\"', '\\"')
+        fixed_json = fixed_json.replace('\\\\n', '\\n')
+        fixed_json = fixed_json.replace('\\\\t', '\\t')
+        return json.loads(fixed_json, strict=False)
 
 # GIAO DIỆN CHÍNH
 st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
