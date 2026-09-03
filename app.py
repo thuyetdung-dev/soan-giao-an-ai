@@ -41,25 +41,22 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
-# 1. HÀM VẼ ĐỒ THỊ HÀM SỐ (MODULE MỚI)
+# 1. HÀM VẼ ĐỒ THỊ HÀM SỐ
 def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
     try:
         fig, ax = plt.subplots(figsize=(6, 4))
         x = np.linspace(x_min, x_max, 400)
         
-        # Xử lý an toàn biểu thức để vẽ
         bieu_thuc = bieu_thuc.replace('^', '**')
         safe_dict = {"x": x, "np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt, "abs": np.abs, "exp": np.exp}
         y = eval(bieu_thuc, {"__builtins__": None}, safe_dict)
         
         ax.plot(x, y, color='blue', lw=2)
         
-        # Vẽ trục tọa độ
         ax.axhline(0, color='black', lw=1.2)
         ax.axvline(0, color='black', lw=1.2)
         ax.grid(True, linestyle='--', alpha=0.6)
         
-        # Giới hạn trục Y để đồ thị không bị kéo giãn quá mức
         y_min, y_max = np.nanmin(y), np.nanmax(y)
         if y_max - y_min > 50:
             ax.set_ylim(-20, 20)
@@ -88,13 +85,10 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
     fig, ax = plt.subplots(figsize=(n * 1.2, rows))
     ax.axis('off')
     
-    # Kẻ khung ngang
     for r in range(rows + 1):
         ax.plot([0, n+1], [r, r], color='black', lw=1.2)
-    # Kẻ vách dọc đầu tiên
     ax.plot([1, 1], [0, rows], color='black', lw=1.2)
     
-    # Gắn nhãn
     ax.text(0.5, rows - 0.5, 'x', ha='center', va='center', fontsize=16, style='italic')
     ax.text(0.5, rows - 1.5, 'y\'', ha='center', va='center', fontsize=16, style='italic')
     if not is_xet_dau:
@@ -103,14 +97,12 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
     y_coords = []
     for i in range(n):
         col_x = 1.5 + i
-        # Hàng x
         if i < len(x_data) and x_data[i]: 
             ax.text(col_x, rows - 0.5, str(x_data[i]), ha='center', va='center', fontsize=15)
             
         left_sign = str(y_phay_data[i-1]).strip() if i > 0 and i-1 < len(y_phay_data) else ""
         right_sign = str(y_phay_data[i+1]).strip() if i+1 < len(y_phay_data) else ""
         
-        # Hàng y'
         if i < len(y_phay_data):
             val_yp = str(y_phay_data[i]).strip()
             if val_yp == "||":
@@ -119,7 +111,6 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
             elif val_yp: 
                 ax.text(col_x, rows - 1.5, val_yp, ha='center', va='center', fontsize=15)
                 
-        # Hàng y (chỉ dành cho bảng biến thiên)
         if not is_xet_dau and i < len(y_val_data) and y_val_data[i]:
             val_y = str(y_val_data[i]).strip()
             
@@ -145,7 +136,6 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
             y_coords.append((col_x, pos))
             ax.text(col_x, pos, val_y, ha='center', va='center', fontsize=15)
     
-    # Vẽ mũi tên cho BBT
     if not is_xet_dau:
         for i in range(len(y_coords)-1):
             x1, y1 = y_coords[i]
@@ -173,7 +163,6 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
-    # Slide Tiêu đề
     slide_title = prs.slides.add_slide(blank_layout)
     tx = slide_title.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
     p = tx.text_frame.paragraphs[0]
@@ -189,7 +178,6 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     p2.font.color.rgb = RGBColor(100, 100, 100)
     p2.alignment = PP_ALIGN.CENTER
 
-    # Các slide nội dung
     for item in noi_dung_bai_hoc.get("cac_slide", []):
         slide = prs.slides.add_slide(blank_layout)
         
@@ -214,20 +202,17 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
             p_c.font.color.rgb = RGBColor(50, 50, 50)
             p_c.space_after = Pt(10)
 
-        # Chèn Đồ thị
         if "do_thi" in item:
             dt = item["do_thi"]
             buf = tao_anh_do_thi(dt.get("bieu_thuc", "x"), dt.get("x_min", -5), dt.get("x_max", 5))
             if buf:
                 slide.shapes.add_picture(buf, Inches(3.5), Inches(3.5), width=Inches(6))
                 
-        # Chèn Bảng biến thiên
         elif "bang_bien_thien" in item:
             buf = tao_anh_bbt(item["bang_bien_thien"], is_xet_dau=False)
             if buf:
                 slide.shapes.add_picture(buf, Inches(2.1), Inches(3.8), width=Inches(9))
                 
-        # Chèn Bảng xét dấu
         elif "bang_xet_dau" in item:
             buf = tao_anh_bbt(item["bang_xet_dau"], is_xet_dau=True)
             if buf:
@@ -299,6 +284,8 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     response = model.generate_content(noi_dung_input)
     
     raw_json = response.text
+    
+    # Sửa lỗi ngắt dòng Regex an toàn trên 1 dòng
     raw_json = re.sub(r'
 ```(?:json)?', '', raw_json).strip()
     raw_json = re.sub(r'
