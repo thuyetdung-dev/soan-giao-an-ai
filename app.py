@@ -8,9 +8,11 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 import docx
 import google.generativeai as genai
 
+# CẤU HÌNH TRANG WEB
 st.set_page_config(page_title="Soạn PowerPoint Tự Động", layout="wide")
 st.title("📚 Trợ Lý Soạn Giáo Án PowerPoint Tự Động")
 
+# LẤY KHÓA VÀ QUÉT MÔ HÌNH
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
@@ -36,12 +38,14 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
+# 1. HÀM TẠO POWERPOINT TỰ ĐỘNG
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
+    # Slide tiêu đề
     slide_title = prs.slides.add_slide(blank_layout)
     tx = slide_title.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
     p = tx.text_frame.paragraphs[0]
@@ -57,9 +61,11 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     p2.font.color.rgb = RGBColor(100, 100, 100)
     p2.alignment = PP_ALIGN.CENTER
 
+    # Các slide nội dung
     for item in noi_dung_bai_hoc.get("cac_slide", []):
         slide = prs.slides.add_slide(blank_layout)
         
+        # Tiêu đề slide
         t_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.7), Inches(0.8))
         p_t = t_box.text_frame.paragraphs[0]
         p_t.text = str(item.get("tieu_de_slide", ""))
@@ -67,6 +73,7 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
+        # Điều chỉnh chiều cao text box tùy thuộc vào việc có bảng biến thiên hay không
         bbt = item.get("bang_bien_thien")
         chieu_cao_chu_thich = Inches(5) if not bbt else Inches(3)
         
@@ -110,11 +117,12 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs.save(file_ra)
     return file_ra
 
+# 2. HÀM GỌI AI PHÂN TÍCH TÀI LIỆU
 def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
 
-   prompt = """
+    prompt = """
     Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint chi tiết, bám sát chuẩn mực trình bày của các đề minh họa THPT.
     
     LƯU Ý VỀ ĐỊNH DẠNG TOÁN TỐI QUAN TRỌNG:
@@ -169,6 +177,7 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
 
+# GIAO DIỆN CHÍNH
 st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
 file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
 
