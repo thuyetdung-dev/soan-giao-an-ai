@@ -114,18 +114,19 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     file_bytes = file_tai_len.getvalue()
     ten_file = file_tai_len.name.lower()
 
-    prompt = """
+   prompt = """
     Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint chi tiết, bám sát chuẩn mực trình bày của các đề minh họa THPT.
     
     LƯU Ý VỀ ĐỊNH DẠNG TOÁN TỐI QUAN TRỌNG:
     - KHÔNG DÙNG MÃ LATEX. CHỈ DÙNG UNICODE để đảm bảo PowerPoint hiển thị chuẩn xác trên một dòng.
-    - Chỉ số dưới (Subscript): BẮT BUỘC dùng ký tự Unicode x₁, x₂ thay vì gõ x1, x2 hay x_1. (Ví dụ chuẩn: Với mọi x₁, x₂ ∈ K, x₁ < x₂ ⇒ f(x₁) < f(x₂)).
+    - Chỉ số dưới (Subscript): BẮT BUỘC dùng ký tự Unicode x₁, x₂ thay vì gõ x1, x2 hay x_1.
     - Mũ/Lũy thừa: Dùng x², x³.
     - Ký hiệu: ∞, ∈, ℝ, ≠, ≤, ≥, →, Δ. Phân số viết ngang (a/b).
     
     LƯU Ý VỀ BẢNG BIẾN THIÊN (MODULE KẺ BẢNG):
     - Cung cấp dữ liệu bảng biến thiên chuẩn xác vào key "bang_bien_thien" gồm 3 mảng: "x", "y_phay", "y".
     - Hàng "y_phay" (đạo hàm) phải dùng các ký hiệu chuẩn: "+", "-", "0", hoặc "||" (tại điểm không xác định).
+    - Hàng "y" (hàm số) BẮT BUỘC phải ghép thêm các mũi tên Unicode (↗ cho đồng biến đi lên, ↘ cho nghịch biến đi xuống) vào cạnh các giá trị để học sinh dễ hình dung dáng điệu đồ thị.
     
     Xuất ra DUY NHẤT JSON thuần theo mẫu:
     {
@@ -134,14 +135,14 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
         "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Định nghĩa tính đơn điệu",
+                "tieu_de_slide": "Ví dụ xét tính đơn điệu",
                 "noi_dung": [
-                    "Hàm số y = f(x) đồng biến trên K nếu với mọi x₁, x₂ ∈ K, x₁ < x₂ thì f(x₁) < f(x₂)."
+                    "Quan sát bảng biến thiên bên dưới, ta thấy..."
                 ],
                 "bang_bien_thien": {
-                    "x": ["x", "-∞", "x₁", "x₂", "+∞"],
-                    "y_phay": ["y'", "+", "0", "-", "||", "+"],
-                    "y": ["y", "-∞", "34", "30", "+∞"]
+                    "x": ["x", "-∞", "1", "3", "+∞"],
+                    "y_phay": ["y'", "+", "0", "-", "0", "+"],
+                    "y": ["y", "-∞ ↗", "34 ↘", "30 ↗", "+∞"]
                 }
             }
         ]
