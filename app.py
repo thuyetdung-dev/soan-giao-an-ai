@@ -52,14 +52,12 @@ def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
         y = eval(bieu_thuc, {"__builtins__": None}, safe_dict)
         
         ax.plot(x, y, color='blue', lw=2)
-        
         ax.axhline(0, color='black', lw=1.2)
         ax.axvline(0, color='black', lw=1.2)
         ax.grid(True, linestyle='--', alpha=0.6)
         
         y_min, y_max = np.nanmin(y), np.nanmax(y)
-        if y_max - y_min > 50:
-            ax.set_ylim(-20, 20)
+        if y_max - y_min > 50: ax.set_ylim(-20, 20)
             
         ax.set_title(f"Đồ thị: y = {bieu_thuc.replace('**', '^')}", fontsize=12)
         
@@ -72,7 +70,7 @@ def tao_anh_do_thi(bieu_thuc, x_min=-5, x_max=5):
         plt.close(fig)
         return None
 
-# 2. HÀM VẼ BẢNG XÉT DẤU VÀ BẢNG BIẾN THIÊN
+# 2. HÀM VẼ BẢNG BIẾN THIÊN TÍCH HỢP ĐỘNG CƠ SỬA LỖI TOÁN HỌC
 def tao_anh_bbt(bbt_data, is_xet_dau=False):
     x_data = bbt_data.get("x", [])
     y_phay_data = bbt_data.get("y_phay", [])
@@ -100,41 +98,59 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
         if i < len(x_data) and x_data[i]: 
             ax.text(col_x, rows - 0.5, str(x_data[i]), ha='center', va='center', fontsize=15)
             
-        left_sign = str(y_phay_data[i-1]).strip() if i > 0 and i-1 < len(y_phay_data) else ""
-        right_sign = str(y_phay_data[i+1]).strip() if i+1 < len(y_phay_data) else ""
-        
-        if i < len(y_phay_data):
-            val_yp = str(y_phay_data[i]).strip()
-            if val_yp == "||":
-                ax.plot([col_x-0.03, col_x-0.03], [0, rows - 1], color='black', lw=1.2)
-                ax.plot([col_x+0.03, col_x+0.03], [0, rows - 1], color='black', lw=1.2)
-            elif val_yp: 
-                ax.text(col_x, rows - 1.5, val_yp, ha='center', va='center', fontsize=15)
+        # Nội suy dấu đạo hàm chính xác từ các ô lân cận
+        left_sign, right_sign = "", ""
+        for j in range(i-1, -1, -1):
+            if j < len(y_phay_data) and y_phay_data[j].strip() in ["+", "-"]:
+                left_sign = y_phay_data[j].strip(); break
+        for j in range(i+1, len(y_phay_data)):
+            if j < len(y_phay_data) and y_phay_data[j].strip() in ["+", "-"]:
+                right_sign = y_phay_data[j].strip(); break
                 
-        if not is_xet_dau and i < len(y_val_data) and y_val_data[i]:
-            val_y = str(y_val_data[i]).strip()
+        val_yp = str(y_phay_data[i]).strip() if i < len(y_phay_data) else ""
+        val_y = str(y_val_data[i]).strip() if i < len(y_val_data) else ""
+        
+        # Bắt thóp AI: Tự động kẻ tiệm cận dù AI quên
+        is_undefined = False
+        if val_yp == "||" or "||" in val_y:
+            is_undefined = True
+        elif "∞" in val_y and " " in val_y and val_yp == "": 
+            is_undefined = True
             
-            if "||" in val_y:
-                parts = val_y.split("||")
-                if len(parts) == 2:
-                    p1, p2 = parts[0].strip(), parts[1].strip()
-                    pos1 = 0.15 if left_sign == "-" else 0.85
-                    pos2 = 0.85 if right_sign == "-" else 0.15
-                    ax.text(col_x - 0.25, pos1, p1, ha='right', va='center', fontsize=14)
-                    ax.text(col_x + 0.25, pos2, p2, ha='left', va='center', fontsize=14)
-                    y_coords.append((col_x - 0.25, pos1))
-                    y_coords.append((col_x + 0.25, pos2))
-                    continue
-
-            if left_sign == "+" or right_sign == "-": pos = 0.85
-            elif left_sign == "-" or right_sign == "+": pos = 0.15
-            else: pos = 0.5
+        if is_undefined:
+            ax.plot([col_x-0.03, col_x-0.03], [0, rows - 1], color='black', lw=1.2)
+            ax.plot([col_x+0.03, col_x+0.03], [0, rows - 1], color='black', lw=1.2)
+        elif val_yp: 
+            ax.text(col_x, rows - 1.5, val_yp, ha='center', va='center', fontsize=15)
             
-            if i == 0: pos = 0.15 if right_sign == "+" else 0.85
-            if i == n - 1: pos = 0.85 if left_sign == "+" else 0.15
+        if not is_xet_dau and val_y:
+            if is_undefined:
+                parts = [p.strip() for p in val_y.split("||")] if "||" in val_y else [val_y]
+                p1 = parts[0] if len(parts) > 0 and parts[0] else ""
+                p2 = parts[1] if len(parts) > 1 and parts[1] else ""
+                
+                # CƯỠNG CHẾ TOÁN HỌC: Nếu AI tính sai giới hạn, Python sẽ tự sửa lại dựa vào dấu đạo hàm
+                if "∞" in p1 or p1 == "": p1 = "-∞" if left_sign == "-" else "+∞"
+                if "∞" in p2 or p2 == "": p2 = "+∞" if right_sign == "-" else "-∞"
+                
+                pos1 = 0.15 if "-∞" in p1 else 0.85
+                pos2 = 0.85 if "+∞" in p2 else 0.15
+                
+                ax.text(col_x - 0.25, pos1, p1, ha='right', va='center', fontsize=14)
+                ax.text(col_x + 0.25, pos2, p2, ha='left', va='center', fontsize=14)
+                y_coords.append((col_x - 0.25, pos1))
+                y_coords.append((col_x + 0.25, pos2))
+            else:
+                if left_sign == "+" and right_sign == "-": pos = 0.85
+                elif left_sign == "-" and right_sign == "+": pos = 0.15
+                elif "∞" in val_y: pos = 0.15 if "-∞" in val_y else 0.85
+                else: pos = 0.5
+                
+                if i == 0: pos = 0.15 if right_sign == "+" else 0.85
+                if i == n - 1: pos = 0.85 if left_sign == "+" else 0.15
 
-            y_coords.append((col_x, pos))
-            ax.text(col_x, pos, val_y, ha='center', va='center', fontsize=15)
+                y_coords.append((col_x, pos))
+                ax.text(col_x, pos, val_y, ha='center', va='center', fontsize=15)
     
     if not is_xet_dau:
         for i in range(len(y_coords)-1):
@@ -143,10 +159,13 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
             if abs(x2 - x1) < 0.6: continue
             
             dx, dy = x2 - x1, y2 - y1
-            sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0.01)
-            ax.annotate("", xy=(x2 - 0.2, y2 - 0.2 * sign_y), 
-                        xytext=(x1 + 0.2, y1 + 0.2 * sign_y),
-                        arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
+            sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0)
+            
+            # Cấm vẽ mũi tên đi ngang bậy bạ
+            if sign_y != 0:
+                ax.annotate("", xy=(x2 - 0.2, y2 - 0.15 * sign_y), 
+                            xytext=(x1 + 0.2, y1 + 0.15 * sign_y),
+                            arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
                         
     ax.set_xlim(0, n+1)
     ax.set_ylim(0, rows)
@@ -156,14 +175,13 @@ def tao_anh_bbt(bbt_data, is_xet_dau=False):
     plt.close(fig)
     return buf
 
-# 3. HÀM TẠO POWERPOINT (ĐÃ NÂNG CẤP TÁCH TEXTBOX)
+# 3. HÀM TẠO POWERPOINT (TÁCH TEXTBOX ĐỂ LÀM HIỆU ỨNG)
 def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
-    # Slide Tiêu đề
     slide_title = prs.slides.add_slide(blank_layout)
     tx = slide_title.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
     p = tx.text_frame.paragraphs[0]
@@ -179,11 +197,9 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
     p2.font.color.rgb = RGBColor(100, 100, 100)
     p2.alignment = PP_ALIGN.CENTER
 
-    # Các slide nội dung
     for item in noi_dung_bai_hoc.get("cac_slide", []):
         slide = prs.slides.add_slide(blank_layout)
         
-        # Tiêu đề Slide
         t_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.7), Inches(0.8))
         p_t = t_box.text_frame.paragraphs[0]
         p_t.text = str(item.get("tieu_de_slide", ""))
@@ -191,47 +207,35 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         p_t.font.bold = True
         p_t.font.color.rgb = RGBColor(0, 51, 102)
 
-        # Trạng thái kiểm tra có hình ảnh hay không để ép khoảng cách dòng
-        has_graphic = "bang_bien_thien" in item or "bang_xet_dau" in item or "do_thi" in item
-        
-        # Tọa độ Y bắt đầu cho câu đầu tiên
-        top_pos = Inches(1.2) 
-        # Nếu có hình, các dòng chữ phải xếp khít lại để nhường không gian phía dưới
-        khoang_cach_dong = Inches(0.45) if has_graphic else Inches(0.6)
-        
-        # TÁCH ĐỘC LẬP TỪNG TEXTBOX
+        # Trải từng dòng thành Textbox độc lập
+        top_pos = Inches(1.3)
         for bullet in item.get("noi_dung", []):
-            # Mỗi câu là một shape mới
             c_box = slide.shapes.add_textbox(Inches(0.8), top_pos, Inches(11.7), Inches(0.5))
             tf_c = c_box.text_frame
             tf_c.word_wrap = True
             
             p_c = tf_c.paragraphs[0]
             p_c.text = f"• {bullet}"
-            p_c.font.size = Pt(20)
+            p_c.font.size = Pt(22)
             p_c.font.color.rgb = RGBColor(50, 50, 50)
-            
-            # Cốt lõi: Cộng dồn tọa độ Y để đẩy câu tiếp theo xuống dưới
-            top_pos += khoang_cach_dong
+            top_pos += Inches(0.55) # Tự động đẩy dòng tiếp theo xuống
 
-        # Chèn Đồ thị
+        # Tính toán tọa độ và chèn Bảng/Hình động ngay dưới dòng Textbox cuối cùng
         if "do_thi" in item:
             dt = item["do_thi"]
             buf = tao_anh_do_thi(dt.get("bieu_thuc", "x"), dt.get("x_min", -5), dt.get("x_max", 5))
             if buf:
-                slide.shapes.add_picture(buf, Inches(3.5), Inches(3.8), width=Inches(5.5))
+                slide.shapes.add_picture(buf, Inches(3.5), top_pos, width=Inches(5.5))
                 
-        # Chèn Bảng biến thiên
         elif "bang_bien_thien" in item:
             buf = tao_anh_bbt(item["bang_bien_thien"], is_xet_dau=False)
             if buf:
-                slide.shapes.add_picture(buf, Inches(2.1), Inches(4.0), width=Inches(9))
+                slide.shapes.add_picture(buf, Inches(2.1), top_pos, width=Inches(9))
                 
-        # Chèn Bảng xét dấu
         elif "bang_xet_dau" in item:
             buf = tao_anh_bbt(item["bang_xet_dau"], is_xet_dau=True)
             if buf:
-                slide.shapes.add_picture(buf, Inches(2.5), Inches(4.5), width=Inches(8))
+                slide.shapes.add_picture(buf, Inches(2.5), top_pos, width=Inches(8))
 
     prs.save(file_ra)
     return file_ra
@@ -242,38 +246,23 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     ten_file = file_tai_len.name.lower()
 
     prompt = """
-    Bạn là chuyên gia sư phạm Toán học. Đọc tài liệu và biên soạn giáo án PowerPoint.
-    
-    CẢNH BÁO: Dịch toàn bộ mã LaTeX sang Unicode (VD: x₁, x², ∞, ∈, ℝ, phân số a/b). TUYỆT ĐỐI không để lại dấu \\.
+    Bạn là chuyên gia Toán học. Biên soạn giáo án PowerPoint theo cấu trúc.
+    Dịch toàn bộ mã LaTeX sang Unicode (x₁, x², ∞, ∈, ℝ, phân số a/b). KHÔNG để lại dấu \\.
     
     YÊU CẦU ĐỒ HỌA TRỰC QUAN (BẮT BUỘC ĐỐI VỚI BÀI HÀM SỐ):
-    Hễ tài liệu nhắc đến hàm số cụ thể, bạn BẮT BUỘC phải chèn 1 trong 3 đối tượng sau vào JSON của slide đó:
-    1. "bang_xet_dau": Gồm 2 mảng "x" và "y_phay" (Dùng khi xét dấu đạo hàm).
-    2. "bang_bien_thien": Gồm 3 mảng "x", "y_phay", "y_val" (Dùng khi tìm cực trị/đơn điệu).
-    3. "do_thi": Vẽ đồ thị. Cung cấp "bieu_thuc" (phải dùng cú pháp Python như x**3 - 3*x**2), "x_min", "x_max".
+    1. "bang_xet_dau": Gồm "x" và "y_phay". 
+    2. "bang_bien_thien": Gồm "x", "y_phay", "y_val". (TIỆM CẬN ĐỨNG BẮT BUỘC DÙNG '||' trong y_phay VÀ y_val).
+    3. "do_thi": "bieu_thuc" (Dùng cú pháp Python x**3 - 3*x**2), "x_min", "x_max".
     
-    ĐỊNH DẠNG ĐẦU RA JSON:
+    ĐỊNH DẠNG ĐẦU RA JSON (Tối thiểu 15 Slide, Tách nhỏ ví dụ ra từng Slide):
     {
         "tieu_de": "Tên bài học",
         "mon": "Toán học",
         "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Ví dụ Đồ thị",
-                "noi_dung": ["Quan sát đồ thị hàm số y = x³ - 3x:"],
-                "do_thi": {"bieu_thuc": "x**3 - 3*x", "x_min": -3, "x_max": 3}
-            },
-            {
-                "tieu_de_slide": "Bảng xét dấu",
-                "noi_dung": ["Ta có bảng xét dấu đạo hàm:"],
-                "bang_xet_dau": {
-                    "x": ["-∞", "", "1", "", "+∞"],
-                    "y_phay": ["", "+", "0", "-", ""]
-                }
-            },
-            {
-                "tieu_de_slide": "Bảng biến thiên",
-                "noi_dung": ["Bảng biến thiên hoàn chỉnh:"],
+                "tieu_de_slide": "Ví dụ Bảng biến thiên",
+                "noi_dung": ["Bảng biến thiên:"],
                 "bang_bien_thien": {
                     "x": ["-∞", "", "1", "", "3", "", "+∞"],
                     "y_phay": ["", "+", "0", "-", "0", "+", ""],
@@ -282,7 +271,6 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
             }
         ]
     }
-    LƯU Ý: Phải xuất tối thiểu 15 slide. Đừng gộp các ví dụ lại với nhau. Trả về JSON thuần.
     """
 
     if ten_file.endswith(".pdf"):
@@ -299,8 +287,6 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     response = model.generate_content(noi_dung_input)
     
     raw_json = response.text
-    
-    # Sửa lỗi Regex hoàn toàn nằm trên 1 dòng duy nhất
     raw_json = re.sub(r'```(?:json)?', '', raw_json).strip()
     raw_json = re.sub(r'```', '', raw_json).strip()
     
@@ -315,25 +301,3 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     except Exception as e:
         fixed_json = raw_json.replace('\\', '\\\\')
         return json.loads(fixed_json, strict=False)
-
-# GIAO DIỆN CHÍNH
-st.write("Chọn tài liệu bài giảng nguồn (PDF, Word hoặc TXT) để tự động soạn Slide:")
-file_tai_len = st.file_uploader("Tải tài liệu lên", type=["pdf", "docx", "txt"], label_visibility="collapsed")
-
-if file_tai_len and selected_model:
-    if st.button("🚀 Bắt đầu soạn giáo án tự động"):
-        with st.spinner(f"AI ({selected_model}) đang thiết kế giáo án và vẽ đồ họa..."):
-            try:
-                du_lieu_json = phan_tich_tai_lieu_ai(file_tai_len, selected_model)
-                file_ppt = xuat_powerpoint(du_lieu_json)
-                st.success("🎉 Đã soạn xong bài giảng PowerPoint!")
-
-                with open(file_ppt, "rb") as f:
-                    st.download_button(
-                        label="📥 Tải bài giảng về máy (.pptx)",
-                        data=f,
-                        file_name="GiaoAn_ToanHoc.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                    )
-            except Exception as e:
-                st.error(f"Lỗi khi phân tích: {str(e)}")
