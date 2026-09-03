@@ -21,7 +21,7 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
-APP_VERSION = "2.0.1 (Hybrid Stable)"
+APP_VERSION = "2.0.2 (Smart Layout)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -441,12 +441,17 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
 
             has_answer = config.include_answers and bool(slide_data.get("answer"))
             content_bottom = 5.48 if has_answer else 6.78
+            
             if visual:
-                add_bullets(slide, chunk, .75, 1.72, 5.35, content_bottom - 1.72, 19)
-                slide.shapes.add_picture(visual, Inches(6.28), Inches(1.72), width=Inches(6.15), height=Inches(4.65))
+                # Đẩy hộp chữ lý thuyết sang trái, nới rộng không gian hiển thị text
+                add_bullets(slide, chunk, .75, 1.72, 7.2, content_bottom - 1.72, 21)
+                
+                # Cố định Đồ thị / Bảng biến thiên ở góc trên bên phải, song song với nút Hoạt động
+                slide.shapes.add_picture(visual, Inches(8.2), Inches(1.08), width=Inches(4.8))
             else:
-                size = 23 if sum(map(len, chunk)) < 280 else 19
+                size = 23 if sum(map(len, chunk)) < 280 else 21
                 add_bullets(slide, chunk, .82, 1.72, 11.7, content_bottom - 1.72, size)
+                
             if has_answer:
                 add_answer_box(slide, slide_data["answer"], theme)
             if config.include_notes and slide_data.get("teacher_note"):
@@ -479,7 +484,6 @@ if not api_key:
     st.error("Chưa cấu hình GEMINI_API_KEY trong Secrets. Xem tệp README để thiết lập.")
     st.stop()
 
-# KHÔI PHỤC MENU CHỌN MÔ HÌNH THÔNG MINH BÊN TRÁI
 with st.sidebar:
     st.header("Thông tin bài dạy")
     teacher = st.text_input("Tên giáo viên", placeholder="Nguyễn Văn A")
@@ -495,7 +499,6 @@ with st.sidebar:
     include_notes = st.checkbox("Tạo ghi chú dành cho giáo viên", True)
     
     st.markdown("---")
-    # Menu AI Tự Động Quét Khóa
     try:
         genai.configure(api_key=api_key)
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
