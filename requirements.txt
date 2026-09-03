@@ -4,3 +4,4 @@ sympy
 python-pptx
 python-docx
 google-generativeai
+matplotlib
