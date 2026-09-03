@@ -91,23 +91,22 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     ten_file = file_tai_len.name.lower()
 
     prompt = """
-    Bạn là một chuyên gia sư phạm. Hãy đọc tài liệu được cung cấp và biên soạn một bài giảng PowerPoint chi tiết.
-    Yêu cầu bắt buộc:
-    - Phân tích sâu và diễn đạt lại nội dung bằng ngôn ngữ giảng dạy của riêng bạn (KHÔNG sao chép y nguyên).
-    - LƯU Ý JSON TỐI QUAN TRỌNG: Mọi công thức Toán học (LaTeX) chứa dấu gạch chéo ngược (\) BẮT BUỘC phải được nhân đôi thành (\\\\) (Ví dụ: \\\\frac, \\\\lim, \\\\sin). Nếu không tệp JSON sẽ bị hỏng.
-    - Bài giảng cần chi tiết, chia thành nhiều slide (khoảng 10-25 slide tùy độ dài tài liệu).
-    - Mỗi slide chứa 4-7 gạch đầu dòng mạch lạc.
-    - Xuất ra DUY NHẤT định dạng JSON thuần theo mẫu sau:
+    Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint từ tài liệu gốc.
+    ĐỂ TRÁNH LỖI BẢN QUYỀN (RECITATION), BẮT BUỘC PHẢI THỰC HIỆN:
+    - KHÔNG chép phạt y nguyên định lý. Hãy chuyển hóa thành ngôn ngữ giảng dạy tương tác (Ví dụ: "Các em lưu ý quy tắc sau...", "Thầy có một ví dụ nhỏ...").
+    - Tự động bổ sung thêm các câu hỏi gợi mở, ghi chú sư phạm, hoặc ví dụ thực tế vào mỗi slide để làm mới hoàn toàn đoạn văn bản gốc.
+    - LƯU Ý JSON: Mọi công thức Toán học (LaTeX) chứa dấu gạch chéo ngược (\) BẮT BUỘC phải được nhân đôi thành (\\\\) (Ví dụ: \\\\frac, \\\\lim).
+    - Xuất ra DUY NHẤT định dạng JSON thuần:
     {
-        "tieu_de": "Tên bài học chi tiết",
-        "mon": "Môn học",
+        "tieu_de": "Tên bài học",
+        "mon": "Toán học",
         "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Tiêu đề Slide (Rõ ràng, cụ thể)",
+                "tieu_de_slide": "Tiêu đề Slide",
                 "noi_dung": [
-                    "Ý giảng dạy 1", 
-                    "Ý giảng dạy 2 chứa công thức \\\\frac{a}{b}"
+                    "Câu hỏi dẫn dắt hoặc ghi chú...",
+                    "Nội dung kiến thức (đã được diễn giải lại)..."
                 ]
             }
         ]
