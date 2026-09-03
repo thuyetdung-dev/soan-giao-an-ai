@@ -115,15 +115,17 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     ten_file = file_tai_len.name.lower()
 
     prompt = """
-    Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint chi tiết.
+    Bạn là chuyên gia sư phạm môn Toán. Hãy thiết kế bài giảng PowerPoint chi tiết, bám sát chuẩn mực trình bày của các đề minh họa THPT.
     
-    LƯU Ý VỀ ĐỊNH DẠNG TOÁN:
-    - KHÔNG DÙNG MÃ LATEX. CHỈ DÙNG UNICODE (x², ∞, ∈, ≠, →, phân số viết ngang a/b).
+    LƯU Ý VỀ ĐỊNH DẠNG TOÁN TỐI QUAN TRỌNG:
+    - KHÔNG DÙNG MÃ LATEX. CHỈ DÙNG UNICODE để đảm bảo PowerPoint hiển thị chuẩn xác trên một dòng.
+    - Chỉ số dưới (Subscript): BẮT BUỘC dùng ký tự Unicode x₁, x₂ thay vì gõ x1, x2 hay x_1. (Ví dụ chuẩn: Với mọi x₁, x₂ ∈ K, x₁ < x₂ ⇒ f(x₁) < f(x₂)).
+    - Mũ/Lũy thừa: Dùng x², x³.
+    - Ký hiệu: ∞, ∈, ℝ, ≠, ≤, ≥, →, Δ. Phân số viết ngang (a/b).
     
-    LƯU Ý VỀ BẢNG BIẾN THIÊN (MODULE MỚI):
-    - Khi giảng về đơn điệu, cực trị, nếu cần thiết hãy cung cấp dữ liệu để hệ thống vẽ bảng.
-    - Dữ liệu này đặt trong key "bang_bien_thien" (nếu slide không cần bảng thì không trả về key này hoặc để null).
-    - "bang_bien_thien" gồm 3 mảng tọa độ: "x", "y_phay", "y".
+    LƯU Ý VỀ BẢNG BIẾN THIÊN (MODULE KẺ BẢNG):
+    - Cung cấp dữ liệu bảng biến thiên chuẩn xác vào key "bang_bien_thien" gồm 3 mảng: "x", "y_phay", "y".
+    - Hàng "y_phay" (đạo hàm) phải dùng các ký hiệu chuẩn: "+", "-", "0", hoặc "||" (tại điểm không xác định).
     
     Xuất ra DUY NHẤT JSON thuần theo mẫu:
     {
@@ -132,11 +134,13 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
         "giao_vien": "Hồ Thuyết Dũng",
         "cac_slide": [
             {
-                "tieu_de_slide": "Ví dụ: Xét tính đơn điệu",
-                "noi_dung": ["Hàm số có tập xác định D = ℝ", "Đạo hàm y' = ..."],
+                "tieu_de_slide": "Định nghĩa tính đơn điệu",
+                "noi_dung": [
+                    "Hàm số y = f(x) đồng biến trên K nếu với mọi x₁, x₂ ∈ K, x₁ < x₂ thì f(x₁) < f(x₂)."
+                ],
                 "bang_bien_thien": {
-                    "x": ["x", "-∞", "1", "3", "+∞"],
-                    "y_phay": ["y'", "+", "0", "-", "0", "+"],
+                    "x": ["x", "-∞", "x₁", "x₂", "+∞"],
+                    "y_phay": ["y'", "+", "0", "-", "||", "+"],
                     "y": ["y", "-∞", "34", "30", "+∞"]
                 }
             }
