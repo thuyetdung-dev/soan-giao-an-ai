@@ -38,12 +38,11 @@ with st.sidebar:
         st.error("❌ Thiếu API Key!")
         selected_model = None
 
-# HÀM VẼ BẢNG BIẾN THIÊN BẰNG MATPLOTLIB
+# HÀM VẼ BẢNG BIẾN THIÊN TỰ ĐỘNG SỬA LỖI TOÁN HỌC
 def tao_anh_bbt(bbt_data):
     x_data = bbt_data.get("x", [])
     y_phay_data = bbt_data.get("y_phay", [])
     y_val_data = bbt_data.get("y_val", [])
-    y_pos_data = bbt_data.get("y_pos", [])
     
     n = len(x_data)
     if n == 0: return None
@@ -51,12 +50,11 @@ def tao_anh_bbt(bbt_data):
     fig, ax = plt.subplots(figsize=(n * 1.2, 3))
     ax.axis('off')
     
-    # Kẻ khung
+    # Kẻ khung cơ bản
     ax.plot([0, n+1], [2, 2], color='black', lw=1.2)
     ax.plot([0, n+1], [1, 1], color='black', lw=1.2)
     ax.plot([1, 1], [0, 3], color='black', lw=1.2)
     
-    # Nhãn cột đầu
     ax.text(0.5, 2.5, 'x', ha='center', va='center', fontsize=16, style='italic')
     ax.text(0.5, 1.5, 'y\'', ha='center', va='center', fontsize=16, style='italic')
     ax.text(0.5, 0.5, 'y', ha='center', va='center', fontsize=16, style='italic')
@@ -64,13 +62,13 @@ def tao_anh_bbt(bbt_data):
     y_coords = []
     for i in range(n):
         col_x = 1.5 + i
-        # Vẽ x
         if i < len(x_data) and x_data[i]: 
             ax.text(col_x, 2.5, str(x_data[i]), ha='center', va='center', fontsize=15)
             
-        # Vẽ y' và đường không xác định (||)
-        left_sign = ""
-        right_sign = ""
+        # Lấy dấu đạo hàm xung quanh để tính toán độ dốc
+        left_sign = str(y_phay_data[i-1]).strip() if i > 0 and i-1 < len(y_phay_data) else ""
+        right_sign = str(y_phay_data[i+1]).strip() if i+1 < len(y_phay_data) else ""
+        
         if i < len(y_phay_data):
             val_yp = str(y_phay_data[i]).strip()
             if val_yp == "||":
@@ -79,70 +77,54 @@ def tao_anh_bbt(bbt_data):
             elif val_yp: 
                 ax.text(col_x, 1.5, val_yp, ha='center', va='center', fontsize=15)
                 
-        # Vẽ y
         if i < len(y_val_data) and y_val_data[i]:
             val_y = str(y_val_data[i]).strip()
             
-            # --- BỘ LỌC TỰ ĐỘNG CHỮA LỖI TỌA ĐỘ CỦA AI ---
-            pos_str = y_pos_data[i] if i < len(y_pos_data) else "bot"
-            
-            if i > 0 and i-1 < len(y_phay_data): left_sign = str(y_phay_data[i-1]).strip()
-            if i+1 < len(y_phay_data): right_sign = str(y_phay_data[i+1]).strip()
-            
-            if "-∞" in val_y:
-                pos_str = "bot"
-            elif "+∞" in val_y:
-                pos_str = "top"
-            else:
-                if left_sign == "+" or right_sign == "-":
-                    pos_str = "top"  # Đỉnh cực đại
-                elif left_sign == "-" or right_sign == "+":
-                    pos_str = "bot"  # Đáy cực tiểu
-            # ---------------------------------------------
-            
-            # Xử lý tự động tách giới hạn 2 bên vách ||
+            # ÉP TỌA ĐỘ TOÁN HỌC THEO DẤU ĐẠO HÀM (Vượt qua ảo giác AI)
             if "||" in val_y:
                 parts = val_y.split("||")
                 if len(parts) == 2:
-                    p1 = parts[0].strip()
-                    p2 = parts[1].strip()
-                    pos1 = 0.85 if "+∞" in p1 else 0.15
-                    pos2 = 0.85 if "+∞" in p2 else 0.15
+                    p1, p2 = parts[0].strip(), parts[1].strip()
+                    # Nếu trước || là "-", đồ thị lao xuống đáy. Nếu "+", lao lên đỉnh.
+                    pos1 = 0.15 if left_sign == "-" else 0.85
+                    # Nếu sau || là "-", đồ thị bắt đầu từ đỉnh. Nếu "+", từ đáy.
+                    pos2 = 0.85 if right_sign == "-" else 0.15
+                    
                     ax.text(col_x - 0.25, pos1, p1, ha='right', va='center', fontsize=14)
                     ax.text(col_x + 0.25, pos2, p2, ha='left', va='center', fontsize=14)
                     y_coords.append((col_x - 0.25, pos1))
                     y_coords.append((col_x + 0.25, pos2))
                     continue
 
-            pos = 0.85 if pos_str == "top" else 0.15
+            # Các điểm cực trị và mút bình thường
+            if left_sign == "+" or right_sign == "-": pos = 0.85  # Cực đại
+            elif left_sign == "-" or right_sign == "+": pos = 0.15 # Cực tiểu
+            else: pos = 0.5
+            
+            # Xử lý vô cực ở mút ngoài cùng
+            if i == 0: pos = 0.15 if right_sign == "+" else 0.85
+            if i == n - 1: pos = 0.85 if left_sign == "+" else 0.15
+
             y_coords.append((col_x, pos))
             ax.text(col_x, pos, val_y, ha='center', va='center', fontsize=15)
     
-    # Vẽ mũi tên vector
+    # Vẽ mũi tên kết nối liên tục
     for i in range(len(y_coords)-1):
         x1, y1 = y_coords[i]
         x2, y2 = y_coords[i+1]
         
-        # Bỏ qua vẽ mũi tên nếu khoảng cách quá gần (xuyên qua vách ||)
-        if abs(x2 - x1) < 0.6:
-            continue
-            
-        dx = x2 - x1
-        dy = y2 - y1
+        if abs(x2 - x1) < 0.6: continue # Bỏ qua nét vẽ cắt ngang vách ||
         
-        # Bỏ qua mũi tên nằm ngang (lỗi ảo giác)
-        if abs(dy) < 0.1:
-           continue 
-
-        shrink_x = 0.2
-        shrink_y = 0.2
-        ax.annotate("", xy=(x2 - shrink_x, y2 - shrink_y * (1 if dy>0 else -1)), 
-                    xytext=(x1 + shrink_x, y1 + shrink_y * (1 if dy>0 else -1)),
+        dx, dy = x2 - x1, y2 - y1
+        sign_y = 1 if dy > 0 else (-1 if dy < 0 else 0.01) # Tránh lỗi chia 0
+        shrink_x, shrink_y = 0.2, 0.2
+        
+        ax.annotate("", xy=(x2 - shrink_x, y2 - shrink_y * sign_y), 
+                    xytext=(x1 + shrink_x, y1 + shrink_y * sign_y),
                     arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
                     
     ax.set_xlim(0, n+1)
     ax.set_ylim(0, 3)
-    
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=300, transparent=True)
     buf.seek(0)
@@ -195,11 +177,10 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
             p_c.font.color.rgb = RGBColor(50, 50, 50)
             p_c.space_after = Pt(10)
 
-        # Chèn ảnh bảng biến thiên
         if bbt and isinstance(bbt, dict):
             buf = tao_anh_bbt(bbt)
             if buf:
-                slide.shapes.add_picture(buf, Inches(2), Inches(4), width=Inches(9))
+                slide.shapes.add_picture(buf, Inches(2.1), Inches(3.8), width=Inches(9))
 
     prs.save(file_ra)
     return file_ra
@@ -212,34 +193,23 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     prompt = """
     Bạn là chuyên gia sư phạm Toán. Thiết kế bài giảng PowerPoint chi tiết.
     
-    LƯU Ý ĐỊNH DẠNG TEXT:
-    - KHÔNG DÙNG MÃ LATEX. Dùng Unicode (x₁, x₂, ∞, ∈, ℝ, phân số viết ngang a/b).
-    - Để giải quyết việc bài giảng bị nén ngắn, BẮT BUỘC mỗi khái niệm, định lý hoặc ví dụ giải toán phải nằm trên 1 slide riêng biệt. Bài giảng phải từ 15-25 slide.
+    LƯU Ý ĐỊNH DẠNG:
+    - BẮT BUỘC Tách nhỏ nội dung: Mỗi khái niệm, định lý hoặc một ví dụ giải bài tập phải độc lập trên 1 slide riêng biệt.
+    - Tính toán Toán học CHÍNH XÁC TUYỆT ĐỐI, đặc biệt là giới hạn (lim) của hàm phân thức tại tiệm cận đứng.
+    - Dùng Unicode (x₁, x₂, ∞, ∈, ℝ, phân số viết ngang a/b). Không dùng LaTeX.
     
-    LƯU Ý VỀ BẢNG BIẾN THIÊN (MODULE ĐỒ HỌA MỚI):
-    - Cung cấp 4 mảng dữ liệu có CÙNG ĐỘ DÀI. Các vị trí khoảng trống để "".
-    - Điểm không xác định dùng "||". Tại dòng y, nếu 2 bên giới hạn khác nhau thì phân tách bằng "||", ví dụ "+∞ || -∞".
-    - Ví dụ hàm số cực đại tại -1 (y=-4), cực tiểu tại 3 (y=4), không xác định tại 1:
+    LƯU Ý VỀ BẢNG BIẾN THIÊN:
+    - Cung cấp 3 mảng dữ liệu CÙNG ĐỘ DÀI: "x", "y_phay", "y_val".
+    - Các khoảng xen kẽ giữa các nghiệm hãy để khoảng trắng "". 
+    - Tại điểm không xác định dùng "||". Tại dòng y, tách giới hạn 2 bên bằng "||".
+    - Ví dụ hàm số y = (x² - 2x + 5)/(x - 1) với y'=0 tại -1 và 3, không xác định tại 1:
         "bang_bien_thien": {
             "x":      ["-∞", "", "-1", "", "1", "", "3", "", "+∞"],
             "y_phay": ["", "+", "0", "-", "||", "-", "0", "+", ""],
-            "y_val":  ["-∞", "", "-4", "", "+∞ || -∞", "", "4", "", "+∞"],
-            "y_pos":  ["bot", "", "top", "", "bot", "", "bot", "", "top"] 
+            "y_val":  ["-∞", "", "-4", "", "-∞ || +∞", "", "4", "", "+∞"]
         }
     
-    Xuất ra DUY NHẤT JSON thuần:
-    {
-        "tieu_de": "Tên bài học",
-        "mon": "Toán học",
-        "giao_vien": "Hồ Thuyết Dũng",
-        "cac_slide": [
-            {
-                "tieu_de_slide": "Ví dụ bảng biến thiên",
-                "noi_dung": ["Ta có bảng biến thiên sau:"],
-                "bang_bien_thien": { ...như ví dụ trên... }
-            }
-        ]
-    }
+    Xuất ra DUY NHẤT JSON thuần.
     """
 
     if ten_file.endswith(".pdf"):
@@ -278,7 +248,7 @@ if file_tai_len and selected_model:
                     st.download_button(
                         label="📥 Tải bài giảng về máy (.pptx)",
                         data=f,
-                        file_name="GiaoAn_ToanHoc_TuyetDep.pptx",
+                        file_name="GiaoAn_ToanHoc.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
             except Exception as e:
