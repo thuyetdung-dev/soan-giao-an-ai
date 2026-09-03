@@ -69,30 +69,75 @@ def tao_anh_bbt(bbt_data):
             ax.text(col_x, 2.5, str(x_data[i]), ha='center', va='center', fontsize=15)
             
         # Vẽ y' và đường không xác định (||)
+        left_sign = ""
+        right_sign = ""
         if i < len(y_phay_data):
-            val_yp = str(y_phay_data[i])
+            val_yp = str(y_phay_data[i]).strip()
             if val_yp == "||":
-                ax.plot([col_x-0.03, col_x-0.03], [0, 2], color='black', lw=1)
-                ax.plot([col_x+0.03, col_x+0.03], [0, 2], color='black', lw=1)
+                ax.plot([col_x-0.03, col_x-0.03], [0, 2], color='black', lw=1.2)
+                ax.plot([col_x+0.03, col_x+0.03], [0, 2], color='black', lw=1.2)
             elif val_yp: 
                 ax.text(col_x, 1.5, val_yp, ha='center', va='center', fontsize=15)
                 
         # Vẽ y
         if i < len(y_val_data) and y_val_data[i]:
+            val_y = str(y_val_data[i]).strip()
+            
+            # --- BỘ LỌC TỰ ĐỘNG CHỮA LỖI TỌA ĐỘ CỦA AI ---
             pos_str = y_pos_data[i] if i < len(y_pos_data) else "bot"
+            
+            if i > 0 and i-1 < len(y_phay_data): left_sign = str(y_phay_data[i-1]).strip()
+            if i+1 < len(y_phay_data): right_sign = str(y_phay_data[i+1]).strip()
+            
+            if "-∞" in val_y:
+                pos_str = "bot"
+            elif "+∞" in val_y:
+                pos_str = "top"
+            else:
+                if left_sign == "+" or right_sign == "-":
+                    pos_str = "top"  # Đỉnh cực đại
+                elif left_sign == "-" or right_sign == "+":
+                    pos_str = "bot"  # Đáy cực tiểu
+            # ---------------------------------------------
+            
+            # Xử lý tự động tách giới hạn 2 bên vách ||
+            if "||" in val_y:
+                parts = val_y.split("||")
+                if len(parts) == 2:
+                    p1 = parts[0].strip()
+                    p2 = parts[1].strip()
+                    pos1 = 0.85 if "+∞" in p1 else 0.15
+                    pos2 = 0.85 if "+∞" in p2 else 0.15
+                    ax.text(col_x - 0.25, pos1, p1, ha='right', va='center', fontsize=14)
+                    ax.text(col_x + 0.25, pos2, p2, ha='left', va='center', fontsize=14)
+                    y_coords.append((col_x - 0.25, pos1))
+                    y_coords.append((col_x + 0.25, pos2))
+                    continue
+
             pos = 0.85 if pos_str == "top" else 0.15
             y_coords.append((col_x, pos))
-            ax.text(col_x, pos, str(y_val_data[i]), ha='center', va='center', fontsize=15)
+            ax.text(col_x, pos, val_y, ha='center', va='center', fontsize=15)
     
     # Vẽ mũi tên vector
     for i in range(len(y_coords)-1):
         x1, y1 = y_coords[i]
         x2, y2 = y_coords[i+1]
+        
+        # Bỏ qua vẽ mũi tên nếu khoảng cách quá gần (xuyên qua vách ||)
+        if abs(x2 - x1) < 0.6:
+            continue
+            
         dx = x2 - x1
         dy = y2 - y1
-        # Cắt ngắn mũi tên để không đè lên chữ
-        ax.annotate("", xy=(x2 - 0.2*dx, y2 - 0.2*dy), 
-                    xytext=(x1 + 0.2*dx, y1 + 0.2*dy),
+        
+        # Bỏ qua mũi tên nằm ngang (lỗi ảo giác)
+        if abs(dy) < 0.1:
+           continue 
+
+        shrink_x = 0.2
+        shrink_y = 0.2
+        ax.annotate("", xy=(x2 - shrink_x, y2 - shrink_y * (1 if dy>0 else -1)), 
+                    xytext=(x1 + shrink_x, y1 + shrink_y * (1 if dy>0 else -1)),
                     arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
                     
     ax.set_xlim(0, n+1)
@@ -154,7 +199,6 @@ def xuat_powerpoint(noi_dung_bai_hoc, file_ra="GiaoAn_Output.pptx"):
         if bbt and isinstance(bbt, dict):
             buf = tao_anh_bbt(bbt)
             if buf:
-                # Căn giữa ảnh ở nửa dưới slide
                 slide.shapes.add_picture(buf, Inches(2), Inches(4), width=Inches(9))
 
     prs.save(file_ra)
@@ -170,17 +214,17 @@ def phan_tich_tai_lieu_ai(file_tai_len, ai_model):
     
     LƯU Ý ĐỊNH DẠNG TEXT:
     - KHÔNG DÙNG MÃ LATEX. Dùng Unicode (x₁, x₂, ∞, ∈, ℝ, phân số viết ngang a/b).
+    - Để giải quyết việc bài giảng bị nén ngắn, BẮT BUỘC mỗi khái niệm, định lý hoặc ví dụ giải toán phải nằm trên 1 slide riêng biệt. Bài giảng phải từ 15-25 slide.
     
     LƯU Ý VỀ BẢNG BIẾN THIÊN (MODULE ĐỒ HỌA MỚI):
-    - Đã có module tự vẽ hình. Bạn phải cung cấp 4 mảng dữ liệu có CÙNG ĐỘ DÀI (rất quan trọng, phải xen kẽ giữa điểm và khoảng).
-    - Các vị trí khoảng trống để "". Tại điểm không xác định dùng "||".
-    - "y_pos" dùng để phần mềm biết tọa độ vẽ ("top" cho điểm ở trên, "bot" cho điểm ở dưới).
-    - Ví dụ hàm số cực đại tại -1 (y=34), cực tiểu tại 3 (y=30):
+    - Cung cấp 4 mảng dữ liệu có CÙNG ĐỘ DÀI. Các vị trí khoảng trống để "".
+    - Điểm không xác định dùng "||". Tại dòng y, nếu 2 bên giới hạn khác nhau thì phân tách bằng "||", ví dụ "+∞ || -∞".
+    - Ví dụ hàm số cực đại tại -1 (y=-4), cực tiểu tại 3 (y=4), không xác định tại 1:
         "bang_bien_thien": {
-            "x":      ["-∞", "", "-1", "", "3", "", "+∞"],
-            "y_phay": ["", "+", "0", "-", "0", "+", ""],
-            "y_val":  ["-∞", "", "34", "", "30", "", "+∞"],
-            "y_pos":  ["bot", "", "top", "", "bot", "", "top"] 
+            "x":      ["-∞", "", "-1", "", "1", "", "3", "", "+∞"],
+            "y_phay": ["", "+", "0", "-", "||", "-", "0", "+", ""],
+            "y_val":  ["-∞", "", "-4", "", "+∞ || -∞", "", "4", "", "+∞"],
+            "y_pos":  ["bot", "", "top", "", "bot", "", "bot", "", "top"] 
         }
     
     Xuất ra DUY NHẤT JSON thuần:
