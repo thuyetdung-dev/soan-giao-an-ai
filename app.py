@@ -112,7 +112,8 @@ prompt = """
         ]
     }
     """
-       if ten_file.endswith(".pdf"):
+    
+if ten_file.endswith(".pdf"):
         noi_dung_input = [{"mime_type": "application/pdf", "data": file_bytes}, prompt]
     elif ten_file.endswith(".docx"):
         doc = docx.Document(io.BytesIO(file_bytes))
