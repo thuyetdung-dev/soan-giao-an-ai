@@ -21,12 +21,15 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 from audit_engine import audit_exam, safe_autofix
+from adaptive_engine import analyze_exam, variant_consistency, build_manifest
 from pedagogy_engine import audit_pedagogy
 from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json, certificate
+from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
+from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "4.0.0 (AI Exam Factory + 3-AI Council + Math/Pedagogy Audit + Certification)"
+APP_VERSION = "5.0.0 (Exam Intelligence Platform + Question DNA + Bank + Multi-Code QA)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -562,8 +565,8 @@ st.caption(f"Phiên bản {APP_VERSION} • Đồ họa Toán học AST • Ch�
 
 api_key = get_api_key()
 with st.sidebar:
-    mode = st.radio("Chế độ làm việc", ["Tạo bài giảng PowerPoint", "🏭 AI Exam Factory V4.0", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"], index=0)
-if not api_key and mode not in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"}:
+    mode = st.radio("Chế độ làm việc", ["Tạo bài giảng PowerPoint", "🏭 AI Exam Factory V4.5", "🧬 Exam Intelligence V5.0", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"], index=0)
+if not api_key and mode not in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°", "🧬 Exam Intelligence V5.0"}:
     st.error("Chưa cấu hình GEMINI_API_KEY trong Secrets. Chế độ Thẩm định đề Toán Pro vẫn chạy offline không cần API.")
     st.stop()
 
@@ -598,9 +601,67 @@ st.subheader("1. Tải tài liệu nguồn")
 uploaded = st.file_uploader("PDF, Word, TXT hoặc JSON (tối đa 20 MB)", type=["pdf", "docx", "txt", "json"])
 st.markdown('<div class="small-note">Nên dùng tài liệu chính thống: SGK, SGV, kế hoạch bài dạy hoặc chuyên đề đã kiểm duyệt.</div>', unsafe_allow_html=True)
 
-if mode == "🏭 AI Exam Factory V4.0":
-    st.subheader("🏭 AI Exam Factory V4.0 — Nhà máy tạo đề + Hội đồng 3 AI")
-    st.info("Luồng V4.0: Ma trận → AI sinh đề → Math Engine → Pedagogy Engine → 3 AI phản biện → QA Gate → Chứng nhận → Word/PDF/PPT.")
+if mode == "🧬 Exam Intelligence V5.0":
+    st.subheader("🧬 Exam Intelligence V5.0 — Question DNA + Ngân hàng câu hỏi + Adaptive Exam Factory")
+    st.info("V5.0: Ngân hàng câu hỏi → Question DNA → chọn theo ma trận → Math Engine + Sư phạm → Hội đồng 3 AI → nhiều mã đề → QA liên mã → Release Gate.")
+    bank=QuestionBank("question_bank_v5.sqlite3")
+    tabA,tabB,tabC=st.tabs(["🗃️ Ngân hàng câu hỏi","🏭 Tạo đề từ ngân hàng","📊 Analytics & DNA"])
+    with tabA:
+        st.write(f"**Số câu đang lưu:** {bank.count()}")
+        bank_file=st.file_uploader("Nhập đề JSON để đưa vào ngân hàng",type=["json"],key="v5_bank_upload")
+        if st.button("➕ NẠP CÂU HỎI VÀO NGÂN HÀNG",use_container_width=True) and bank_file:
+            try:
+                ex=json.loads(bank_file.getvalue().decode("utf-8")); st.success(bank.add_exam(ex))
+            except Exception as e: st.error(str(e))
+        c1,c2,c3=st.columns(3)
+        topic_filter=c1.text_input("Lọc chủ đề",key="v5_topic")
+        level_filter=c2.text_input("Lọc mức độ",key="v5_level")
+        type_filter=c3.selectbox("Lọc loại",["","mcq","true_false","short_answer"],key="v5_type")
+        rows=bank.search(topic_filter,level_filter,type_filter,100)
+        st.dataframe([{"ID":q.get("id"),"Loại":qtype(q),"Mức độ":q.get("level"),"Chủ đề":q.get("topic"),"DNA":q.get("_dna",{}).get("fingerprint","")[:12],"Lần dùng":q.get("_uses",0)} for q in rows],use_container_width=True)
+    with tabB:
+        total_v5=st.number_input("Tổng số câu",1,60,10,key="v5_total")
+        mcq_v5=st.number_input("MCQ",0,int(total_v5),min(10,int(total_v5)),key="v5_mcq")
+        tf_v5=st.number_input("Đúng/Sai",0,int(total_v5),0,key="v5_tf")
+        short_v5=st.number_input("Trả lời ngắn",0,int(total_v5),0,key="v5_short")
+        levels_v5=st.text_input("Mức độ", "nhận biết:3, thông hiểu:3, vận dụng:3, vận dụng cao:1",key="v5_levels")
+        topics_v5=st.text_area("Chủ đề ưu tiên", "Tính đơn điệu và cực trị của hàm số",key="v5_topics")
+        codes_v5=st.number_input("Số mã đề",1,20,4,key="v5_codes")
+        if st.button("🚀 TẠO ĐỀ V5.0 + RELEASE GATE",type="primary",use_container_width=True):
+            try:
+                bp={"total_questions":int(total_v5),"type_distribution":{"mcq":int(mcq_v5),"true_false":int(tf_v5),"short_answer":int(short_v5)},"level_distribution":{}}
+                for item in levels_v5.split(','):
+                    if ':' in item:
+                        k,v=item.split(':',1); bp["level_distribution"][k.strip()]=int(v.strip())
+                bp["topic_distribution"]={x.strip():1 for x in topics_v5.splitlines() if x.strip()}
+                exam={"title":"Đề Toán V5.0","subject":"Toán","grade":grade,"blueprint":bp,"questions":select_from_bank(bank,bp)}
+                if len(exam["questions"])<int(total_v5): st.warning(f"Ngân hàng chỉ đáp ứng {len(exam['questions'])}/{int(total_v5)} câu theo bộ lọc. Có thể bổ sung câu hoặc dùng AI Factory V4.5 để sinh câu mới.")
+                mr=audit_exam(exam); pr=audit_pedagogy(exam)
+                variants=build_variants(exam,int(codes_v5)); vc=variant_consistency(variants)
+                gate=release_gate(mr,pr,[],vc); mf=build_v5_manifest(exam,variants,gate)
+                bank.mark_used(exam["questions"])
+                st.session_state["v5_exam"]=exam; st.session_state["v5_mr"]=mr; st.session_state["v5_pr"]=pr; st.session_state["v5_variants"]=variants; st.session_state["v5_manifest"]=mf
+            except Exception as e: st.error(f"V5.0 lỗi: {e}")
+        exam=st.session_state.get("v5_exam"); mr=st.session_state.get("v5_mr"); pr=st.session_state.get("v5_pr"); variants=st.session_state.get("v5_variants",[]); mf=st.session_state.get("v5_manifest",{})
+        if exam:
+            gate=mf.get("release_gate","CONDITIONAL"); a,b,c,d=st.columns(4); a.metric("Câu",len(exam.get("questions",[]))); b.metric("Gate",gate); c.metric("Mã đề",len(variants)); d.metric("DNA unique",coverage_report(exam).get("unique",0))
+            if gate=="CERTIFIED": st.success("🟢 CERTIFIED — đề vượt Release Gate V5.0 trong phạm vi các bộ máy tự động.")
+            elif gate=="REJECTED": st.error("🔴 REJECTED — cần sửa lỗi trước khi phát hành.")
+            else: st.warning("🟡 CONDITIONAL — cần giáo viên duyệt các điểm REVIEW.")
+            st.download_button("📥 Tải manifest V5.0",json.dumps(mf,ensure_ascii=False,indent=2),"manifest_v5.json","application/json",use_container_width=True)
+            st.download_button("📥 Tải đề gốc JSON",json.dumps(exam,ensure_ascii=False,indent=2),"de_goc_v5.json","application/json",use_container_width=True)
+    with tabC:
+        st.json(bank.stats())
+        qshow=bank.search(limit=20)
+        if qshow:
+            with st.expander("🧬 DNA của 20 câu gần nhất"):
+                st.json([question_dna(q) for q in qshow])
+    bank.close()
+    st.stop()
+
+if mode == "🏭 AI Exam Factory V4.5":
+    st.subheader("🏭 AI Exam Factory V4.5 — AI Exam Factory + Adaptive Intelligence")
+    st.info("Luồng V4.5: Ma trận → AI sinh đề → Math Engine → Sư phạm → 3 AI phản biện → phân tích độ khó → nhiều mã đề → QA liên mã → chứng nhận.")
     col1,col2=st.columns(2)
     with col1:
         total_q=st.number_input("Tổng số câu", 1, 60, 10)
@@ -611,7 +672,9 @@ if mode == "🏭 AI Exam Factory V4.0":
         tf_n=st.number_input("Số Đúng/Sai",0,int(total_q),0)
         short_n=st.number_input("Số trả lời ngắn",0,int(total_q),0)
         levels=st.text_input("Phân bố mức độ", "nhận biết:3, thông hiểu:3, vận dụng:3, vận dụng cao:1")
-    if st.button("🚀 SINH ĐỀ V4.0 + HỘI ĐỒNG 3 AI", type="primary", use_container_width=True):
+        variant_n=st.number_input("Số mã đề", 1, 8, 4, key="variant_n")
+        variant_strategy=st.selectbox("Chiến lược mã đề", ["Đảo thứ tự câu + phương án", "Biến thể tham số (AI sinh lại + kiểm chứng)"])
+    if st.button("🚀 SINH ĐỀ V4.5 + HỘI ĐỒNG 3 AI", type="primary", use_container_width=True):
         if not selected_model: st.error("Chưa có mô hình AI.")
         else:
             try:
@@ -638,8 +701,25 @@ if mode == "🏭 AI Exam Factory V4.0":
                         except Exception as e: council.append({"role":role,"status":"REVIEW","score":0,"findings":[{"severity":"REVIEW","finding":f"Không đọc được phản biện: {e}"}]})
                     st.write("5/5 QA Gate + chứng nhận…")
                     rep=combined_v4_report(exam,mr,pr,council)
-                    st.session_state["v4_exam"]=exam; st.session_state["v4_report"]=rep
-                    status.update(label="Hoàn tất dây chuyền V4.0",state="complete",expanded=False)
+                    adaptive=analyze_exam(exam)
+                    variants=[exam]
+                    import copy, random
+                    for vi in range(1,int(variant_n)):
+                        vv=copy.deepcopy(exam)
+                        rng=random.Random(1000+vi)
+                        rng.shuffle(vv.get("questions",[]))
+                        for q in vv.get("questions",[]):
+                            if q.get("type","mcq")=="mcq" and isinstance(q.get("options"),list) and len(q["options"])==4:
+                                old_opts=list(q["options"]); old_ans=q.get("answer_index")
+                                order=list(range(4)); rng.shuffle(order)
+                                q["options"]=[old_opts[i] for i in order]
+                                if isinstance(old_ans,int): q["answer_index"]=order.index(old_ans)
+                        vv["variant_code"]=chr(66+vi) if vi<25 else f"V{vi+1}"
+                        variants.append(vv)
+                    manifest=build_manifest(variants,rep)
+                    manifest["adaptive_analysis"]=adaptive
+                    st.session_state["v4_exam"]=exam; st.session_state["v4_report"]=rep; st.session_state["v45_variants"]=variants; st.session_state["v45_manifest"]=manifest
+                    status.update(label="Hoàn tất dây chuyền V4.5",state="complete",expanded=False)
             except Exception as e: st.error(f"V4.0 gặp lỗi: {e}")
     exam=st.session_state.get("v4_exam"); rep=st.session_state.get("v4_report")
     if exam and rep:
@@ -654,6 +734,14 @@ if mode == "🏭 AI Exam Factory V4.0":
         st.download_button("📥 JSON báo cáo V4.0",json.dumps({"exam":exam,"report":rep},ensure_ascii=False,indent=2),"bao_cao_V4_0.json","application/json",use_container_width=True)
         st.download_button("📝 Xuất Word đề",build_exam_docx(exam,rep["certificate"]),"de_toan_V4_0.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",use_container_width=True)
         st.download_button("📊 Xuất PowerPoint đề",build_exam_pptx(exam,theme_name,False),"de_toan_V4_0.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
+        variants=st.session_state.get("v45_variants",[exam]); manifest=st.session_state.get("v45_manifest",{})
+        st.markdown("### 🧠 Adaptive Intelligence")
+        ad=manifest.get("adaptive_analysis",{})
+        ac1,ac2,ac3=st.columns(3); ac1.metric("Độ khó heuristic TB",ad.get("summary",{}).get("avg_difficulty",0)); ac2.metric("Biên độ độ khó",ad.get("summary",{}).get("spread",0)); ac3.metric("Số mã đề",len(variants))
+        st.caption("Điểm độ khó là heuristic hỗ trợ biên tập, không phải chỉ số tâm trắc học.")
+        vc=variant_consistency(variants); st.write(f"**QA liên mã:** {vc['status']} — {len(vc.get('issues',[]))} cảnh báo")
+        if vc.get("issues"): st.dataframe(vc["issues"],use_container_width=True)
+        st.download_button("📦 Tải manifest + QA nhiều mã",json.dumps(manifest,ensure_ascii=False,indent=2),"manifest_v4_5.json","application/json",use_container_width=True)
     st.stop()
 
 if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"}:
