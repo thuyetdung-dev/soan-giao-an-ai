@@ -7,7 +7,6 @@ import re
 import uuid
 from dataclasses import dataclass
 from typing import Any
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
