@@ -26,10 +26,11 @@ from pedagogy_engine import audit_pedagogy
 from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json, certificate
 from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
+from lesson_engine import normalize_lesson, audit_lesson
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "5.0.0 P0 (Lesson Studio + Exam Intelligence)"
+APP_VERSION = "6.0.0 (Lesson Studio Pro + Exam Intelligence V5)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -288,31 +289,7 @@ def split_bullets(items: list[str], max_chars: int = 430) -> list[list[str]]:
     return pages
 
 def validate_lesson(data: Any) -> dict[str, Any]:
-    if not isinstance(data, dict):
-        raise ValueError("AI không trả về đúng cấu trúc bài giảng.")
-    slides = data.get("slides")
-    if not isinstance(slides, list) or not slides:
-        raise ValueError("Không tìm thấy danh sách slide.")
-    cleaned_slides = []
-    for slide in slides[:MAX_SLIDES]:
-        if not isinstance(slide, dict):
-            continue
-        title = clean_text(slide.get("title"))[:180]
-        bullets = slide.get("bullets", [])
-        if not isinstance(bullets, list):
-            bullets = [str(bullets)]
-        cleaned_slides.append({
-            "title": title or "Nội dung bài học",
-            "activity": clean_text(slide.get("activity", "HÌNH THÀNH KIẾN THỨC")).upper()[:60],
-            "bullets": [clean_text(x)[:700] for x in bullets[:15]],
-            "answer": clean_text(slide.get("answer"))[:1800],
-            "teacher_note": clean_text(slide.get("teacher_note"))[:1200],
-            "graph": slide.get("graph") if isinstance(slide.get("graph"), dict) else None,
-            "variation_table": slide.get("variation_table") if isinstance(slide.get("variation_table"), dict) else None,
-        })
-    if not cleaned_slides:
-        raise ValueError("Các slide AI tạo ra không hợp lệ.")
-    return {"title": clean_text(data.get("title"))[:200], "slides": cleaned_slides}
+    return normalize_lesson(data, MAX_SLIDES)
 
 def build_prompt(config: LessonConfig) -> str:
     answer_rule = "Có thể cung cấp đáp án ở trường answer." if config.include_answers else "Trường answer luôn để trống."
@@ -332,6 +309,8 @@ NGUYÊN TẮC NỘI DUNG:
 - Mỗi hoạt động phải có nhiệm vụ rõ, sản phẩm mong đợi và cách kiểm tra nhanh phù hợp học sinh {config.student_level}.
 - Mỗi định nghĩa, quy tắc, ví dụ hoặc câu hỏi chính đặt trên slide độc lập; tối đa 5–6 dòng/slide. {answer_rule}
 - Công thức dùng ký hiệu Toán chính xác; không dùng ký hiệu mơ hồ hoặc kết luận thiếu điều kiện.
+- Dùng ít nhất 6 kiểu layout phù hợp nội dung, không lặp một kiểu quá 4 slide liên tiếp.
+- Chuỗi slide phải theo tiến trình học tập: vấn đề → khám phá → khái quát → luyện tập → vận dụng → tự đánh giá.
 
 ĐỒ HỌA TÙY CHỌN:
 - graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
@@ -340,10 +319,16 @@ NGUYÊN TẮC NỘI DUNG:
 Trả về duy nhất JSON chuẩn:
 {{
   "title":"Tên bài học",
+  "objectives":["Yêu cầu cần đạt 1","Yêu cầu cần đạt 2"],
   "slides":[{{
     "title":"Tiêu đề slide",
+    "subtitle":"Thông điệp ngắn nếu cần",
     "activity":"HÌNH THÀNH KIẾN THỨC",
+    "layout":"section|concept|process|example|practice|compare|visual|quiz|summary|content",
     "bullets":["Ý 1","Ý 2"],
+    "formulas":["f'(x)=0"],
+    "question":"Câu hỏi hoặc nhiệm vụ dành cho học sinh",
+    "product":"Sản phẩm học tập mong đợi",
     "answer":"",
     "teacher_note":"Ghi chú giảng dạy chi tiết cho giáo viên",
     "graph":null,
@@ -378,12 +363,9 @@ def generate_lesson(model_name: str, source_text: str, source_bytes: bytes, sour
         raise ValueError("AI trả về JSON không hợp lệ. Vui lòng tạo lại; hệ thống không tự biến đổi công thức để tránh làm sai nội dung.")
 
 def add_full_background(slide, color: tuple[int, int, int]) -> None:
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(7.5))
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = RGBColor(*color)
-    shape.line.fill.background()
-    slide.shapes._spTree.remove(shape._element)
-    slide.shapes._spTree.insert(2, shape._element)
+    fill = slide.background.fill
+    fill.solid()
+    fill.fore_color.rgb = RGBColor(*color)
 
 def add_text(slide, text: str, left: float, top: float, width: float, height: float,
              size: int, color=(40, 40, 40), bold=False, align=PP_ALIGN.LEFT,
@@ -442,6 +424,33 @@ def add_answer_box(slide, answer: str, theme):
     shape.line.color.rgb = RGBColor(*theme["accent"])
     add_text(slide, "ĐÁP ÁN/GỢI Ý: " + answer, 1.0, 5.9, 11.3, .55, 16, theme["primary"], True)
 
+
+def add_panel(slide, left, top, width, height, fill, line=None, radius=True):
+    shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if radius else MSO_SHAPE.RECTANGLE
+    shape = slide.shapes.add_shape(shape_type, Inches(left), Inches(top), Inches(width), Inches(height))
+    shape.fill.solid(); shape.fill.fore_color.rgb = RGBColor(*fill)
+    if line: shape.line.color.rgb = RGBColor(*line)
+    else: shape.line.fill.background()
+    return shape
+
+
+def add_formula_block(slide, formulas: list[str], left: float, top: float, width: float, theme):
+    if not formulas: return
+    height = min(1.35, .42 + .38 * len(formulas))
+    add_panel(slide, left, top, width, height, theme["light"], theme["accent"])
+    add_text(slide, "\n".join(formulas), left+.18, top+.14, width-.36, height-.25, 22,
+             theme["primary"], True, PP_ALIGN.CENTER, font="Cambria Math", valign=MSO_ANCHOR.MIDDLE)
+
+
+def add_learning_task(slide, slide_data, theme, top=4.85):
+    question=slide_data.get("question",""); product=slide_data.get("product","")
+    if question:
+        add_panel(slide,.82,top,7.6,.72,theme["light"],theme["accent"])
+        add_text(slide,"NHIỆM VỤ  •  "+question,1.02,top+.13,7.2,.43,16,theme["primary"],True)
+    if product:
+        add_panel(slide,8.65,top,3.87,.72,(248,249,250),(205,211,217))
+        add_text(slide,"SẢN PHẨM  •  "+product,8.83,top+.13,3.5,.43,14,(55,65,72),True)
+
 def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
@@ -460,14 +469,28 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
     add_text(cover, info, 1.28, 4.55, 10.5, 1.0, 18, theme["light"])
     add_text(cover, "POWERPOINT BÀI GIẢNG TOÁN THPT", 1.28, 6.65, 10.5, .35, 12, theme["light"], True)
 
-    page = 1
+    if lesson.get("objectives"):
+        objective_slide=prs.slides.add_slide(blank); add_full_background(objective_slide,(255,255,255))
+        add_header(objective_slide,"Sau bài học, học sinh làm được gì?","KHỞI ĐỘNG",theme,1)
+        add_bullets(objective_slide,lesson["objectives"],1.05,1.85,11.2,4.7,22)
+
+    page = 2 if lesson.get("objectives") else 1
     for slide_data in lesson["slides"]:
         chunks = split_bullets(slide_data["bullets"])
         for chunk_index, chunk in enumerate(chunks):
             slide = prs.slides.add_slide(blank)
-            add_full_background(slide, (255, 255, 255))
+            layout=slide_data.get("layout","content")
+            add_full_background(slide, theme["primary"] if layout=="section" else (255, 255, 255))
             title = slide_data["title"] + (f" ({chunk_index + 1}/{len(chunks)})" if len(chunks) > 1 else "")
             activity = slide_data["activity"]
+            if layout=="section":
+                add_text(slide,activity,.95,1.0,11.4,.45,15,theme["light"],True)
+                add_text(slide,title,.95,1.72,11.2,2.0,38,(255,255,255),True,valign=MSO_ANCHOR.MIDDLE)
+                if slide_data.get("subtitle"): add_text(slide,slide_data["subtitle"],.98,4.05,10.9,.85,20,theme["light"])
+                add_text(slide,str(page),12.2,6.85,.45,.3,11,theme["light"],False,PP_ALIGN.RIGHT)
+                if config.include_notes and slide_data.get("teacher_note"): slide.notes_slide.notes_text_frame.text=slide_data["teacher_note"]
+                page += 1
+                continue
             add_header(slide, title, activity, theme, page)
             visual = None
             if chunk_index == 0 and slide_data.get("graph"):
@@ -480,8 +503,25 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
 
             has_answer = config.include_answers and bool(slide_data.get("answer"))
             content_bottom = 5.48 if has_answer else 6.78
-            
-            if visual:
+            formulas=slide_data.get("formulas",[])
+
+            if layout=="process" and len(chunk)>=2:
+                step_w=11.55/min(4,len(chunk))
+                for idx,item in enumerate(chunk[:4]):
+                    left=.82+idx*step_w
+                    add_panel(slide,left,1.85,step_w-.22,2.5,theme["light"],theme["accent"])
+                    circle=slide.shapes.add_shape(MSO_SHAPE.OVAL,Inches(left+.12),Inches(1.96),Inches(.68),Inches(.68)); circle.fill.solid(); circle.fill.fore_color.rgb=RGBColor(*theme["accent"]); circle.line.fill.background()
+                    add_text(slide,str(idx+1),left+.18,2.03,.55,.55,25,(255,255,255),True,PP_ALIGN.CENTER,valign=MSO_ANCHOR.MIDDLE)
+                    add_text(slide,item,left+.18,2.82,step_w-.55,1.25,17,(43,48,53),True,PP_ALIGN.CENTER)
+                add_formula_block(slide,formulas,2.25,4.62,8.8,theme)
+            elif layout in {"concept","example","compare"} and not visual:
+                add_panel(slide,.82,1.75,7.25,3.65,(255,255,255),(215,221,226))
+                add_bullets(slide,chunk,1.04,2.02,6.8,3.05,20)
+                add_panel(slide,8.35,1.75,4.17,3.65,theme["light"],theme["accent"])
+                side_text=slide_data.get("question") or slide_data.get("subtitle") or slide_data.get("product") or "Quan sát, trao đổi và rút ra kết luận."
+                add_text(slide,side_text,8.68,2.08,3.5,2.25,20,theme["primary"],True,PP_ALIGN.CENTER,valign=MSO_ANCHOR.MIDDLE)
+                add_formula_block(slide,formulas,8.62,4.35,3.63,theme)
+            elif visual:
                 # ÉP CHIỀU RỘNG CHỮ TỐI ĐA LÀ 7.0 INCH (~1/2 trang theo chiều ngang)
                 # Chữ chạy tới mốc này sẽ TỰ ĐỘNG rớt dòng, hoàn toàn không che lấp Hình bên phải.
                 add_bullets(slide, chunk, .75, 1.72, 7.0, content_bottom - 1.72, 21)
@@ -490,7 +530,12 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
                 slide.shapes.add_picture(visual, Inches(8.2), Inches(1.08), width=Inches(4.8))
             else:
                 size = 23 if sum(map(len, chunk)) < 280 else 21
-                add_bullets(slide, chunk, .82, 1.72, 11.7, content_bottom - 1.72, size)
+                body_bottom=4.72 if slide_data.get("question") or slide_data.get("product") else content_bottom
+                add_bullets(slide, chunk, .82, 1.72, 11.7, body_bottom - 1.72, size)
+                if formulas: add_formula_block(slide,formulas,2.15,max(3.75,body_bottom-.9),9.0,theme)
+
+            if (slide_data.get("question") or slide_data.get("product")) and layout not in {"concept","example","compare"}:
+                add_learning_task(slide,slide_data,theme,4.78 if not has_answer else 4.72)
                 
             if has_answer:
                 add_answer_box(slide, slide_data["answer"], theme)
@@ -827,8 +872,9 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Tạo bài giảng")
-if st.button("🚀 Phân tích và tạo PowerPoint", type="primary", use_container_width=True, disabled=uploaded is None):
+st.subheader("2. Lesson Studio Pro")
+st.caption("Tạo cấu trúc → kiểm định → xem trước/chỉnh sửa → xuất PowerPoint.")
+if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_container_width=True, disabled=uploaded is None):
     try:
         config = LessonConfig(teacher, school, grade, book, lesson, int(periods), student_level,
                               int(slide_count), theme_name, include_answers, include_notes)
@@ -838,16 +884,13 @@ if st.button("🚀 Phân tích và tạo PowerPoint", type="primary", use_contai
             st.write("Đang đọc và cấu trúc hóa tài liệu nguồn…")
             lesson_data = generate_lesson(selected_model, source_text, source_bytes, source_type, config)
             
-            st.write("Đang kiểm tra nội dung và dựng PowerPoint…")
-            pptx_bytes = build_pptx(lesson_data, config)
-            status.update(label="Đã tạo xong bài giảng", state="complete", expanded=False)
-            
-        safe_name = re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+", "_", lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename = f"{safe_name[:70]}_{uuid.uuid4().hex[:6]}.pptx"
-        st.success(f"Đã tạo {len(lesson_data['slides'])} slide. Các ý dài đã được cắt trang tự động.")
-        st.download_button("📥 Tải PowerPoint", pptx_bytes, filename,
-                           "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                           use_container_width=True)
+            st.write("Đang kiểm định tiến trình, mật độ chữ và độ đa dạng bố cục…")
+            lesson_report=audit_lesson(lesson_data,int(slide_count),source_text)
+            st.session_state["lesson_data_v6"]=lesson_data
+            st.session_state["lesson_config_v6"]=config
+            st.session_state["lesson_source_v6"]=source_text
+            st.session_state["lesson_report_v6"]=lesson_report
+            status.update(label="Đã tạo cấu trúc — mời thầy duyệt trước khi xuất", state="complete", expanded=False)
                            
     except json.JSONDecodeError:
         st.error("AI trả về dữ liệu chưa đúng định dạng. Vui lòng bấm tạo lại.")
@@ -855,3 +898,37 @@ if st.button("🚀 Phân tích và tạo PowerPoint", type="primary", use_contai
         st.error(str(exc))
     except Exception as e:
         st.error(f"Lỗi: {str(e)}")
+
+lesson_data=st.session_state.get("lesson_data_v6")
+config=st.session_state.get("lesson_config_v6")
+report=st.session_state.get("lesson_report_v6")
+if lesson_data and config and report:
+    st.markdown("### 3. Kiểm định và xem trước")
+    a,b,c,d=st.columns(4)
+    a.metric("Slide nội dung",report["summary"]["slides"])
+    b.metric("Điểm QA",report["score"])
+    c.metric("Trạng thái",report["status"])
+    d.metric("Kiểu bố cục",len(report["summary"]["layouts"]))
+    if report["status"]=="FAIL": st.error("Bài giảng thiếu thành phần bắt buộc; cần duyệt và sửa trước khi dùng.")
+    elif report["status"]=="REVIEW": st.warning("Bài giảng đã tạo nhưng còn điểm cần giáo viên duyệt.")
+    else: st.success("Không phát hiện lỗi trong phạm vi kiểm định tự động.")
+    if report["issues"]: st.dataframe(report["issues"],use_container_width=True)
+    preview=[{"STT":i,"Hoạt động":s["activity"],"Layout":s["layout"],"Tiêu đề":s["title"],"Nhiệm vụ":s.get("question","")[:90],"Sản phẩm":s.get("product","")[:70]} for i,s in enumerate(lesson_data["slides"],1)]
+    st.dataframe(preview,use_container_width=True,height=360)
+    with st.expander("✏️ Chỉnh sửa JSON bài giảng trước khi xuất"):
+        edited=st.text_area("Nội dung cấu trúc",json.dumps(lesson_data,ensure_ascii=False,indent=2),height=440,key="lesson_json_editor")
+        if st.button("✅ ÁP DỤNG CHỈNH SỬA VÀ KIỂM ĐỊNH LẠI",use_container_width=True):
+            try:
+                updated=validate_lesson(json.loads(edited))
+                new_report=audit_lesson(updated,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+                st.session_state["lesson_data_v6"]=updated; st.session_state["lesson_report_v6"]=new_report
+                st.rerun()
+            except Exception as exc: st.error(f"Không thể áp dụng: {exc}")
+    st.markdown("### 4. Xuất PowerPoint")
+    try:
+        pptx_bytes=build_pptx(lesson_data,config)
+        safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
+        filename=f"{safe_name[:70]}_LessonStudioV6.pptx"
+        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V6",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
+        st.download_button("📋 TẢI BÁO CÁO KIỂM ĐỊNH",json.dumps(report,ensure_ascii=False,indent=2),f"{safe_name[:70]}_QA.json","application/json",use_container_width=True)
+    except Exception as exc: st.error(f"Không thể dựng PowerPoint: {exc}")
