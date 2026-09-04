@@ -58,15 +58,22 @@ class QuestionBank:
         self.conn.commit()
 
 def select_from_bank(bank, blueprint):
-    selected=[]; used=set()
-    for qtype_name,count in (blueprint.get("type_distribution") or {}).items():
-        for level,count_level in (blueprint.get("level_distribution") or {}).items():
-            if count_level<=0: continue
-            pool=bank.search(level=level,typ=qtype_name,limit=500)
-            for q in pool:
-                if fingerprint(q) in used: continue
-                selected.append(q); used.add(fingerprint(q))
-                if len([x for x in selected if norm(x.get("level"))==norm(level) and qtype(x)==qtype_name])>=min(count_level,int(count)):
-                    break
-    total=int(blueprint.get("total_questions",len(selected)))
-    return selected[:total]
+    """Greedily satisfy all marginal counts without multiplying type/level totals."""
+    total=int(blueprint.get("total_questions",0))
+    type_need={qtype({"type":k}):int(v) for k,v in (blueprint.get("type_distribution") or {}).items()}
+    level_need={norm(k):int(v) for k,v in (blueprint.get("level_distribution") or {}).items()}
+    topic_need={norm(k):int(v) for k,v in (blueprint.get("topic_distribution") or {}).items()}
+    pool=bank.search(limit=max(500,total*30)); selected=[]; used=set()
+    while len(selected)<total:
+        candidates=[]
+        for q in pool:
+            fp=fingerprint(q); typ=qtype(q); level=norm(q.get("level")); topic=norm(q.get("topic"))
+            if fp in used or type_need.get(typ,0)<=0 or level_need.get(level,0)<=0: continue
+            score=(3 if topic_need.get(topic,0)>0 else 0) - int(q.get("_uses",0))*0.001
+            candidates.append((score,q))
+        if not candidates: break
+        _,chosen=max(candidates,key=lambda item:item[0])
+        fp=fingerprint(chosen); typ=qtype(chosen); level=norm(chosen.get("level")); topic=norm(chosen.get("topic"))
+        selected.append(chosen); used.add(fp); type_need[typ]-=1; level_need[level]-=1
+        if topic in topic_need and topic_need[topic]>0: topic_need[topic]-=1
+    return selected
