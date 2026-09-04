@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from typing import Any
+from equation_engine import formula_diagnostics
 
 ACTIVITIES = ["KHỞI ĐỘNG", "HÌNH THÀNH KIẾN THỨC", "LUYỆN TẬP", "VẬN DỤNG", "CỦNG CỐ"]
 LAYOUTS = {"section", "concept", "process", "example", "practice", "compare", "visual", "quiz", "summary", "content"}
@@ -42,6 +43,7 @@ def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
             "product": _text(raw.get("product"), 500),
             "answer": _text(raw.get("answer"), 1600),
             "teacher_note": _text(raw.get("teacher_note"), 1600),
+            "source_ref": _text(raw.get("source_ref"), 500),
             "graph": raw.get("graph") if isinstance(raw.get("graph"), dict) else None,
             "variation_table": raw.get("variation_table") if isinstance(raw.get("variation_table"), dict) else None,
         })
@@ -75,6 +77,8 @@ def audit_lesson(lesson: dict, requested_slides: int, source_text: str = "") -> 
         if not s.get("bullets") and not s.get("question") and not s.get("formulas") and not s.get("graph") and not s.get("variation_table") and s.get("layout")!="section": row.append("Thiếu nội dung chính")
         if s.get("layout") in {"practice","quiz"} and not s.get("question"): row.append("Thiếu câu hỏi/nhiệm vụ")
         if s.get("layout") in {"practice","quiz"} and not s.get("product"): row.append("Chưa nêu sản phẩm học tập")
+        for formula in s.get("formulas",[]): row.extend(formula_diagnostics(formula))
+        if source_text.strip() and not s.get("source_ref"): row.append("Chưa ghi tham chiếu nguồn trong Notes")
         rows.append({"slide":i,"title":s.get("title"),"status":"REVIEW" if row else "PASS","issues":row})
     if source_text.strip():
         source_words=set(re.findall(r"[a-zà-ỹ]{4,}",source_text.lower()))
