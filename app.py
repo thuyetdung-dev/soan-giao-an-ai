@@ -20,22 +20,16 @@ from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
-from audit_engine import audit_exam, auto_fix_exam as safe_autofix
+from audit_engine import audit_exam, safe_autofix
 from adaptive_engine import analyze_exam, variant_consistency, build_manifest
-from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank, qtype
+from pedagogy_engine import audit_pedagogy
+from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json, certificate
+from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
-
-# --- Vá lỗi giả lập các module sư phạm chưa cài đặt ---
-def audit_pedagogy(exam): return {"status": "PASS", "summary": {"score": 100, "fail": 0, "manual_review": 0}, "exam_issues": [], "questions": []}
-def exam_generation_prompt(bp, source): return ""
-def reviewer_prompt(role, exam, mr, pr): return ""
-def parse_ai_json(text): return {}
-def certificate(base): return {"certificate_status": "DRAFT_MODE"}
-# ------------------------------------------------------
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "5.0.0 (Exam Intelligence Platform + Question DNA + Bank + Multi-Code QA)"
+APP_VERSION = "5.0.0 P0 (Lesson Studio + Exam Intelligence)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -125,7 +119,13 @@ def read_source(uploaded_file) -> tuple[str, bytes, str]:
         return text[:MAX_SOURCE_CHARS], data, "txt"
     if name.endswith(".pdf"):
         return "", data, "pdf"
-    raise ValueError("Chỉ hỗ trợ PDF, DOCX và TXT.")
+    if name.endswith(".json"):
+        try:
+            parsed = json.loads(data.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Tệp JSON không hợp lệ.") from exc
+        return json.dumps(parsed, ensure_ascii=False)[:MAX_SOURCE_CHARS], data, "json"
+    raise ValueError("Chỉ hỗ trợ PDF, DOCX, TXT và JSON.")
 
 ALLOWED_FUNCTIONS = {
     "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt,
@@ -316,16 +316,22 @@ def validate_lesson(data: Any) -> dict[str, Any]:
 
 def build_prompt(config: LessonConfig) -> str:
     answer_rule = "Có thể cung cấp đáp án ở trường answer." if config.include_answers else "Trường answer luôn để trống."
+    lesson_name = config.lesson.strip() or "Tự xác định chính xác từ tài liệu nguồn"
     return f"""
-Bạn là chuyên gia Toán THPT. Viết bài giảng bám sát cấu trúc GDPT 2018 (5 hoạt động).
-- Bài: {config.lesson or 'Tự xác định từ tài liệu'}
-- Đối tượng: {config.student_level}; Số slide dự kiến: {config.slide_count} (CỰC KỲ QUAN TRỌNG: Phải dàn đều nội dung ra đủ số lượng slide này, không được gộp ép).
+Bạn là chuyên gia thiết kế bài giảng Toán theo Chương trình GDPT 2018.
+THÔNG TIN BẮT BUỘC:
+- Khối: {config.grade}; bộ sách: {config.book}; bài: {lesson_name}.
+- Thời lượng: {config.periods} tiết; đối tượng: {config.student_level}.
+- Tạo khoảng {config.slide_count} slide, phân bổ hợp lý theo đúng thời lượng.
 
-YÊU CẦU SƯ PHẠM (Phân bổ rành mạch cho 3 tiết học):
-- TIẾT 1 (Khái niệm & Khoảng): Dạy định nghĩa GTLN, GTNN. Cách tìm trên một khoảng bằng Bảng biến thiên. Thiết kế 3-4 ví dụ và bài tập.
-- TIẾT 2 (Đoạn [a; b]): Dạy Quy tắc 3 bước trên đoạn. Tuyệt đối nhấn mạnh KHÔNG CẦN vẽ Bảng biến thiên. Cung cấp 4-5 bài tập luyện tập.
-- TIẾT 3 (Thực tế): Quay lại giải quyết bài toán thực tế hộp carton ở phần Khởi động. Thêm 5 câu trắc nghiệm Củng cố (tạo các bẫy nhầm lẫn giữa khoảng và đoạn).
-- Quy tắc trình bày: MỖI định nghĩa, MỖI bước giải, MỖI ví dụ, MỖI câu trắc nghiệm PHẢI nằm trên MỘT slide độc lập. Tối đa 5-6 dòng/slide. {answer_rule}
+NGUYÊN TẮC NỘI DUNG:
+- Xác định đúng chủ đề từ tên bài và tài liệu nguồn; tuyệt đối không đưa nội dung của một bài khác.
+- Tài liệu nguồn là căn cứ chính. Không bịa định nghĩa, định lý, dữ kiện, ví dụ hay số trang.
+- Nếu nguồn thiếu thông tin thiết yếu, nêu rõ trong teacher_note thay vì tự khẳng định.
+- Tổ chức theo các hoạt động: KHỞI ĐỘNG, HÌNH THÀNH KIẾN THỨC, LUYỆN TẬP, VẬN DỤNG, CỦNG CỐ.
+- Mỗi hoạt động phải có nhiệm vụ rõ, sản phẩm mong đợi và cách kiểm tra nhanh phù hợp học sinh {config.student_level}.
+- Mỗi định nghĩa, quy tắc, ví dụ hoặc câu hỏi chính đặt trên slide độc lập; tối đa 5–6 dòng/slide. {answer_rule}
+- Công thức dùng ký hiệu Toán chính xác; không dùng ký hiệu mơ hồ hoặc kết luận thiếu điều kiện.
 
 ĐỒ HỌA TÙY CHỌN:
 - graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
@@ -366,11 +372,10 @@ def generate_lesson(model_name: str, source_text: str, source_bytes: bytes, sour
     try:
         match = re.search(r'\{.*\}', raw_json, re.DOTALL)
         if match:
-            clean_json = match.group(0).replace('\\', '\\\\')
-            return validate_lesson(json.loads(clean_json, strict=False))
+            return validate_lesson(json.loads(match.group(0), strict=False))
         return validate_lesson(json.loads(raw_json))
     except Exception:
-        return validate_lesson(json.loads(raw_json.replace('\\', '\\\\'), strict=False))
+        raise ValueError("AI trả về JSON không hợp lệ. Vui lòng tạo lại; hệ thống không tự biến đổi công thức để tránh làm sai nội dung.")
 
 def add_full_background(slide, color: tuple[int, int, int]) -> None:
     shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(7.5))
@@ -516,7 +521,7 @@ def build_exam_docx(exam: dict[str, Any], certificate_data: dict[str, Any] | Non
             doc.add_paragraph("Trả lời: ........................................................")
     if certificate_data:
         doc.add_page_break()
-        doc.add_heading("CHỨNG NHẬN QA V4.0", 1)
+        doc.add_heading("BÁO CÁO QA V5.0", 1)
         doc.add_paragraph(json.dumps(certificate_data, ensure_ascii=False, indent=2))
     out=io.BytesIO(); doc.save(out); return out.getvalue()
 
@@ -525,7 +530,7 @@ def build_exam_pptx(exam: dict[str, Any], theme_name: str = "Xanh học thuật"
     prs=Presentation(); prs.slide_width, prs.slide_height=Inches(13.333), Inches(7.5); blank=prs.slide_layouts[6]
     theme=THEMES[theme_name]
     cover=prs.slides.add_slide(blank); add_full_background(cover, theme["primary"])
-    add_text(cover, "AI EXAM FACTORY V4.0", 1.0, 1.0, 11.0, .5, 18, theme["light"], True)
+    add_text(cover, "AI EXAM FACTORY V5.0", 1.0, 1.0, 11.0, .5, 18, theme["light"], True)
     add_text(cover, exam.get("title", "ĐỀ KIỂM TRA TOÁN"), 1.0, 2.0, 11.2, 2.0, 34, (255,255,255), True, valign=MSO_ANCHOR.MIDDLE)
     add_text(cover, f"{exam.get('grade','')} • {exam.get('subject','Toán')}", 1.0, 4.5, 10.5, .5, 18, theme["light"])
     for i,q in enumerate(exam.get("questions", []),1):
@@ -549,9 +554,24 @@ def combined_v4_report(exam: dict[str, Any], math_report: dict, ped_report: dict
     status="FAIL" if math_report["status"]=="FAIL" or ped_report["status"]=="FAIL" or council_fail else "MANUAL_REVIEW" if math_report["status"]=="MANUAL_REVIEW" or ped_report["status"]=="MANUAL_REVIEW" or council_review else "PASS"
     scores=[math_report["summary"]["score"], ped_report["summary"]["score"]]+[float(x.get("score",0)) for x in council if isinstance(x.get("score"),(int,float))]
     score=round(sum(scores)/len(scores),1) if scores else 0
-    base={"version":"4.0.0","status":status,"summary":{"total":len(exam.get("questions",[])),"score":score},"math":math_report,"pedagogy":ped_report,"council":council}
+    base={"version":"5.0.0","status":status,"summary":{"total":len(exam.get("questions",[])),"score":score},"math":math_report,"pedagogy":ped_report,"council":council}
     base["certificate"]=certificate(base)
     return base
+
+
+def validate_blueprint_counts(total: int, type_counts: dict[str, int], level_counts: dict[str, int]) -> None:
+    if sum(type_counts.values()) != total:
+        raise ValueError(f"Tổng các loại câu phải bằng {total}; hiện là {sum(type_counts.values())}.")
+    if sum(level_counts.values()) != total:
+        raise ValueError(f"Tổng phân bố mức độ phải bằng {total}; hiện là {sum(level_counts.values())}.")
+
+
+def balanced_topic_distribution(raw_topics: str, total: int) -> dict[str, int]:
+    topics = [line.strip() for line in raw_topics.splitlines() if line.strip()]
+    if not topics:
+        raise ValueError("Cần nhập ít nhất một chủ đề.")
+    base, remainder = divmod(total, len(topics))
+    return {topic: base + (1 if index < remainder else 0) for index, topic in enumerate(topics)}
 
 def get_api_key() -> str:
     try:
@@ -571,7 +591,7 @@ st.caption(f"Phiên bản {APP_VERSION} • Đồ họa Toán học AST • Ch�
 
 api_key = get_api_key()
 with st.sidebar:
-    mode = st.radio("Chế độ làm việc", ["Tạo bài giảng PowerPoint", "🏭 AI Exam Factory V4.5", "🧬 Exam Intelligence V5.0", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"], index=0)
+    mode = st.radio("Chế độ làm việc", ["Tạo bài giảng PowerPoint", "🏭 AI Exam Factory V5.0", "🧬 Exam Intelligence V5.0", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"], index=0)
 if not api_key and mode not in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°", "🧬 Exam Intelligence V5.0"}:
     st.error("Chưa cấu hình GEMINI_API_KEY trong Secrets. Chế độ Thẩm định đề Toán Pro vẫn chạy offline không cần API.")
     st.stop()
@@ -639,9 +659,10 @@ if mode == "🧬 Exam Intelligence V5.0":
                 for item in levels_v5.split(','):
                     if ':' in item:
                         k,v=item.split(':',1); bp["level_distribution"][k.strip()]=int(v.strip())
-                bp["topic_distribution"]={x.strip():1 for x in topics_v5.splitlines() if x.strip()}
+                validate_blueprint_counts(int(total_v5), bp["type_distribution"], bp["level_distribution"])
+                bp["topic_distribution"]=balanced_topic_distribution(topics_v5, int(total_v5))
                 exam={"title":"Đề Toán V5.0","subject":"Toán","grade":grade,"blueprint":bp,"questions":select_from_bank(bank,bp)}
-                if len(exam["questions"])<int(total_v5): st.warning(f"Ngân hàng chỉ đáp ứng {len(exam['questions'])}/{int(total_v5)} câu theo bộ lọc. Có thể bổ sung câu hoặc dùng AI Factory V4.5 để sinh câu mới.")
+                if len(exam["questions"])<int(total_v5): st.warning(f"Ngân hàng chỉ đáp ứng {len(exam['questions'])}/{int(total_v5)} câu theo bộ lọc. Có thể bổ sung câu hoặc dùng AI Factory V5.0 để sinh câu mới.")
                 mr=audit_exam(exam); pr=audit_pedagogy(exam)
                 variants=build_variants(exam,int(codes_v5)); vc=variant_consistency(variants)
                 gate=release_gate(mr,pr,[],vc); mf=build_v5_manifest(exam,variants,gate)
@@ -665,9 +686,9 @@ if mode == "🧬 Exam Intelligence V5.0":
     bank.close()
     st.stop()
 
-if mode == "🏭 AI Exam Factory V4.5":
-    st.subheader("🏭 AI Exam Factory V4.5 — AI Exam Factory + Adaptive Intelligence")
-    st.info("Luồng V4.5: Ma trận → AI sinh đề → Math Engine → Sư phạm → 3 AI phản biện → phân tích độ khó → nhiều mã đề → QA liên mã → chứng nhận.")
+if mode == "🏭 AI Exam Factory V5.0":
+    st.subheader("🏭 AI Exam Factory V5.0 — AI Exam Factory + Adaptive Intelligence")
+    st.info("Luồng V5.0: Ma trận → AI sinh đề → Math Engine → Sư phạm → 3 AI phản biện → phân tích độ khó → nhiều mã đề → QA liên mã → báo cáo kiểm định.")
     col1,col2=st.columns(2)
     with col1:
         total_q=st.number_input("Tổng số câu", 1, 60, 10)
@@ -680,7 +701,7 @@ if mode == "🏭 AI Exam Factory V4.5":
         levels=st.text_input("Phân bố mức độ", "nhận biết:3, thông hiểu:3, vận dụng:3, vận dụng cao:1")
         variant_n=st.number_input("Số mã đề", 1, 8, 4, key="variant_n")
         variant_strategy=st.selectbox("Chiến lược mã đề", ["Đảo thứ tự câu + phương án", "Biến thể tham số (AI sinh lại + kiểm chứng)"])
-    if st.button("🚀 SINH ĐỀ V4.5 + HỘI ĐỒNG 3 AI", type="primary", use_container_width=True):
+    if st.button("🚀 SINH ĐỀ V5.0 + HỘI ĐỒNG 3 AI", type="primary", use_container_width=True):
         if not selected_model: st.error("Chưa có mô hình AI.")
         else:
             try:
@@ -688,12 +709,13 @@ if mode == "🏭 AI Exam Factory V4.5":
                 for item in levels.split(','):
                     if ':' in item:
                         k,v=item.split(':',1); bp["level_distribution"][k.strip()]=int(v.strip())
-                bp["topic_distribution"]={x.strip():1 for x in topics.splitlines() if x.strip()}
+                validate_blueprint_counts(int(total_q), bp["type_distribution"], bp["level_distribution"])
+                bp["topic_distribution"]=balanced_topic_distribution(topics, int(total_q))
                 source_text=""
                 if uploaded and uploaded.name.lower().endswith((".txt",".docx")):
                     source_text=read_source(uploaded)[0]
                 model=genai.GenerativeModel(selected_model,generation_config={"response_mime_type":"application/json","temperature":0.2})
-                with st.status("Đang chạy dây chuyền V4.0…", expanded=True) as status:
+                with st.status("Đang chạy dây chuyền V5.0…", expanded=True) as status:
                     st.write("1/5 AI đang sinh đề theo ma trận…")
                     exam=parse_ai_json(model.generate_content(exam_generation_prompt(bp,source_text)).text)
                     st.write("2/5 Math Engine kiểm chứng…")
@@ -708,38 +730,25 @@ if mode == "🏭 AI Exam Factory V4.5":
                     st.write("5/5 QA Gate + chứng nhận…")
                     rep=combined_v4_report(exam,mr,pr,council)
                     adaptive=analyze_exam(exam)
-                    variants=[exam]
-                    import copy, random
-                    for vi in range(1,int(variant_n)):
-                        vv=copy.deepcopy(exam)
-                        rng=random.Random(1000+vi)
-                        rng.shuffle(vv.get("questions",[]))
-                        for q in vv.get("questions",[]):
-                            if q.get("type","mcq")=="mcq" and isinstance(q.get("options"),list) and len(q["options"])==4:
-                                old_opts=list(q["options"]); old_ans=q.get("answer_index")
-                                order=list(range(4)); rng.shuffle(order)
-                                q["options"]=[old_opts[i] for i in order]
-                                if isinstance(old_ans,int): q["answer_index"]=order.index(old_ans)
-                        vv["variant_code"]=chr(66+vi) if vi<25 else f"V{vi+1}"
-                        variants.append(vv)
+                    variants=build_variants(exam,int(variant_n),seed=1000)
                     manifest=build_manifest(variants,rep)
                     manifest["adaptive_analysis"]=adaptive
                     st.session_state["v4_exam"]=exam; st.session_state["v4_report"]=rep; st.session_state["v45_variants"]=variants; st.session_state["v45_manifest"]=manifest
-                    status.update(label="Hoàn tất dây chuyền V4.5",state="complete",expanded=False)
-            except Exception as e: st.error(f"V4.0 gặp lỗi: {e}")
+                    status.update(label="Hoàn tất dây chuyền V5.0",state="complete",expanded=False)
+            except Exception as e: st.error(f"V5.0 gặp lỗi: {e}")
     exam=st.session_state.get("v4_exam"); rep=st.session_state.get("v4_report")
     if exam and rep:
         c1,c2,c3=st.columns(3); c1.metric("QA Score",rep["summary"]["score"]); c2.metric("Trạng thái",rep["status"]); c3.metric("Chứng nhận",rep["certificate"]["certificate_status"])
-        if rep["status"]=="PASS": st.success("🟢 CERTIFIED — đề vượt qua Gate V4.0 trong phạm vi các bộ máy kiểm tra.")
+        if rep["status"]=="PASS": st.success("🟢 ĐẠT KIỂM TRA TỰ ĐỘNG V5.0 — vẫn cần giáo viên duyệt cuối.")
         elif rep["status"]=="FAIL": st.error("🔴 REJECTED — còn lỗi FAIL, không nên phát hành.")
         else: st.warning("🟡 CONDITIONAL — cần giáo viên duyệt các điểm REVIEW.")
         for c in rep["council"]:
             with st.expander(f"{c.get('role','Reviewer')} — {c.get('status','REVIEW')} — {c.get('score',0)}"):
                 st.json(c)
         with st.expander("🔐 Chứng nhận & dấu vết phiên bản"): st.json(rep["certificate"])
-        st.download_button("📥 JSON báo cáo V4.0",json.dumps({"exam":exam,"report":rep},ensure_ascii=False,indent=2),"bao_cao_V4_0.json","application/json",use_container_width=True)
-        st.download_button("📝 Xuất Word đề",build_exam_docx(exam,rep["certificate"]),"de_toan_V4_0.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",use_container_width=True)
-        st.download_button("📊 Xuất PowerPoint đề",build_exam_pptx(exam,theme_name,False),"de_toan_V4_0.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
+        st.download_button("📥 JSON báo cáo V5.0",json.dumps({"exam":exam,"report":rep},ensure_ascii=False,indent=2),"bao_cao_V5_0.json","application/json",use_container_width=True)
+        st.download_button("📝 Xuất Word đề",build_exam_docx(exam,rep["certificate"]),"de_toan_V5_0.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",use_container_width=True)
+        st.download_button("📊 Xuất PowerPoint đề",build_exam_pptx(exam,theme_name,False),"de_toan_V5_0.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
         variants=st.session_state.get("v45_variants",[exam]); manifest=st.session_state.get("v45_manifest",{})
         st.markdown("### 🧠 Adaptive Intelligence")
         ad=manifest.get("adaptive_analysis",{})
@@ -747,12 +756,12 @@ if mode == "🏭 AI Exam Factory V4.5":
         st.caption("Điểm độ khó là heuristic hỗ trợ biên tập, không phải chỉ số tâm trắc học.")
         vc=variant_consistency(variants); st.write(f"**QA liên mã:** {vc['status']} — {len(vc.get('issues',[]))} cảnh báo")
         if vc.get("issues"): st.dataframe(vc["issues"],use_container_width=True)
-        st.download_button("📦 Tải manifest + QA nhiều mã",json.dumps(manifest,ensure_ascii=False,indent=2),"manifest_v4_5.json","application/json",use_container_width=True)
+        st.download_button("📦 Tải manifest + QA nhiều mã",json.dumps(manifest,ensure_ascii=False,indent=2),"manifest_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
 if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"}:
     st.subheader("2. Hệ thống thẩm định đề Toán 360°")
-    st.info("V3.5: Math Engine + kiểm tra cấu trúc + ma trận + miền xác định + trùng/gần trùng + chất lượng sư phạm + QA Gate. Các tiêu chí heuristic chỉ đưa ra REVIEW, không tự kết luận thay giáo viên.")
+    st.info("V5.0: Math Engine + kiểm tra cấu trúc + ma trận + miền xác định + trùng/gần trùng + chất lượng sư phạm + QA Gate. Các tiêu chí heuristic chỉ đưa ra REVIEW, không tự kết luận thay giáo viên.")
     json_text = st.text_area("Dán trực tiếp JSON của đề", height=220, placeholder='{"questions": [...], "blueprint": {...}}')
     if st.button("🛡️ CHẠY THẨM ĐỊNH 360°", type="primary", use_container_width=True) and (uploaded or json_text.strip()):
         try:
@@ -814,8 +823,8 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
             st.success(f"Đã sửa {len(changes)} lỗi kỹ thuật xác định chắc chắn.")
             if changes: st.code("\n".join(changes))
             st.rerun()
-        payload={"version":"3.5.0","exam":exam,"audit":report}
-        st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v3_5.json","application/json",use_container_width=True)
+        payload={"version":"5.0.0","exam":exam,"audit":report}
+        st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
 st.subheader("2. Tạo bài giảng")
