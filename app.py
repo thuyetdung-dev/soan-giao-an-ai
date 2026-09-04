@@ -20,9 +20,16 @@ from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
-from audit_engine import audit_exam, normalize_exam, auto_fix_exam
+from audit_engine import audit_exam, safe_autofix
+from adaptive_engine import analyze_exam, variant_consistency, build_manifest
+from pedagogy_engine import audit_pedagogy
+from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json, certificate
+from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
+from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
-APP_VERSION = "3.3.0 (Hệ thống thẩm định đề Toán Pro)"
+APP_VERSION = "5.0.0 (Exam Intelligence Platform + Question DNA + Bank + Multi-Code QA)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -485,6 +492,61 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
     prs.save(output)
     return output.getvalue()
 
+
+def build_exam_docx(exam: dict[str, Any], certificate_data: dict[str, Any] | None = None) -> bytes:
+    doc = Document()
+    doc.add_heading(exam.get("title", "ĐỀ KIỂM TRA TOÁN"), 0)
+    doc.add_paragraph(f"{exam.get('subject','Toán')} • {exam.get('grade','')}" )
+    for i, q in enumerate(exam.get("questions", []), 1):
+        doc.add_heading(f"Câu {i}. {q.get('question','')}", level=2)
+        typ = str(q.get("type", "mcq"))
+        if typ in {"mcq", "multiple_choice"}:
+            for j, opt in enumerate(q.get("options", [])):
+                doc.add_paragraph(f"{chr(65+j)}. {opt}")
+        elif typ in {"true_false", "tf"}:
+            for j, stt in enumerate(q.get("statements", q.get("options", []))):
+                doc.add_paragraph(f"{j+1}) {stt}")
+        else:
+            doc.add_paragraph("Trả lời: ........................................................")
+    if certificate_data:
+        doc.add_page_break()
+        doc.add_heading("CHỨNG NHẬN QA V4.0", 1)
+        doc.add_paragraph(json.dumps(certificate_data, ensure_ascii=False, indent=2))
+    out=io.BytesIO(); doc.save(out); return out.getvalue()
+
+
+def build_exam_pptx(exam: dict[str, Any], theme_name: str = "Xanh học thuật", show_answers: bool = False) -> bytes:
+    prs=Presentation(); prs.slide_width, prs.slide_height=Inches(13.333), Inches(7.5); blank=prs.slide_layouts[6]
+    theme=THEMES[theme_name]
+    cover=prs.slides.add_slide(blank); add_full_background(cover, theme["primary"])
+    add_text(cover, "AI EXAM FACTORY V4.0", 1.0, 1.0, 11.0, .5, 18, theme["light"], True)
+    add_text(cover, exam.get("title", "ĐỀ KIỂM TRA TOÁN"), 1.0, 2.0, 11.2, 2.0, 34, (255,255,255), True, valign=MSO_ANCHOR.MIDDLE)
+    add_text(cover, f"{exam.get('grade','')} • {exam.get('subject','Toán')}", 1.0, 4.5, 10.5, .5, 18, theme["light"])
+    for i,q in enumerate(exam.get("questions", []),1):
+        slide=prs.slides.add_slide(blank); add_full_background(slide,(255,255,255))
+        add_header(slide, f"Câu {i}", str(q.get("level", "")).upper() or "ĐỀ KIỂM TRA", theme, i)
+        bullets=[clean_text(q.get("question",""))]
+        typ=q.get("type","mcq")
+        if typ in {"mcq","multiple_choice"}:
+            bullets += [f"{chr(65+j)}. {clean_text(o)}" for j,o in enumerate(q.get("options",[]))]
+        elif typ in {"true_false","tf"}:
+            bullets += [f"{j+1}) {clean_text(o)}" for j,o in enumerate(q.get("statements",q.get("options",[])))]
+        add_bullets(slide, bullets, .8, 1.7, 11.7, 4.6, 19)
+        if show_answers and q.get("solution"):
+            add_answer_box(slide, clean_text(q.get("solution")), theme)
+    out=io.BytesIO(); prs.save(out); return out.getvalue()
+
+
+def combined_v4_report(exam: dict[str, Any], math_report: dict, ped_report: dict, council: list[dict]) -> dict[str, Any]:
+    council_fail=any(str(x.get("status")).upper()=="FAIL" for x in council)
+    council_review=any(str(x.get("status")).upper() in {"REVIEW","MANUAL_REVIEW"} for x in council)
+    status="FAIL" if math_report["status"]=="FAIL" or ped_report["status"]=="FAIL" or council_fail else "MANUAL_REVIEW" if math_report["status"]=="MANUAL_REVIEW" or ped_report["status"]=="MANUAL_REVIEW" or council_review else "PASS"
+    scores=[math_report["summary"]["score"], ped_report["summary"]["score"]]+[float(x.get("score",0)) for x in council if isinstance(x.get("score"),(int,float))]
+    score=round(sum(scores)/len(scores),1) if scores else 0
+    base={"version":"4.0.0","status":status,"summary":{"total":len(exam.get("questions",[])),"score":score},"math":math_report,"pedagogy":ped_report,"council":council}
+    base["certificate"]=certificate(base)
+    return base
+
 def get_api_key() -> str:
     try:
         return st.secrets.get("GEMINI_API_KEY", "")
@@ -502,90 +564,10 @@ st.title("📐 Trợ lý soạn PowerPoint Toán THPT")
 st.caption(f"Phiên bản {APP_VERSION} • Đồ họa Toán học AST • Chống rớt chữ")
 
 api_key = get_api_key()
-
-mode = st.radio("Chế độ hệ thống", ["Bài giảng PowerPoint", "Thẩm định đề Toán"], horizontal=True)
-
-if mode == "Thẩm định đề Toán":
-    st.header("🧪 HỆ THỐNG THẨM ĐỊNH ĐỀ TOÁN")
-    st.caption("Offline-first: cấu trúc • đáp án độc lập • nhiều đáp án đúng • miền xác định • Math Engine • lời giải • trùng/gần trùng • ma trận chủ đề/mức độ/dạng câu • QA Gate")
-    exam_file = st.file_uploader("Tải đề dạng JSON", type=["json"], key="exam_json")
-    pasted = st.text_area("Hoặc dán JSON đề thi tại đây", height=220)
-    if st.button("🔍 CHẠY THẨM ĐỊNH", type="primary", use_container_width=True):
-        try:
-            raw = exam_file.getvalue().decode("utf-8-sig") if exam_file is not None else pasted
-            if not raw.strip():
-                raise ValueError("Hãy tải tệp JSON hoặc dán JSON của đề thi.")
-            exam = normalize_exam(json.loads(raw))
-            report = audit_exam(exam)
-            summary = report["summary"]
-            st.session_state["last_exam"] = exam
-            st.session_state["last_report"] = report
-            if report["status"] == "PASS":
-                st.success("✅ QA GATE: PASS — đề đủ điều kiện qua vòng thẩm định tự động.")
-            elif report["status"] == "FAIL":
-                st.error("❌ QA GATE: FAIL — không được phát hành khi còn lỗi nghiêm trọng.")
-            else:
-                st.warning("⚠️ QA GATE: MANUAL_REVIEW — cần giáo viên thẩm định các mục chưa tự động xác nhận được.")
-            c1,c2,c3,c4,c5 = st.columns(5)
-            c1.metric("Tổng câu", summary.get("total", 0)); c2.metric("PASS", summary.get("pass", 0)); c3.metric("FAIL", summary.get("fail", 0)); c4.metric("MANUAL", summary.get("manual_review", 0)); c5.metric("Điểm QA", f'{summary.get("score", 0)}%')
-            # Dashboard ma trận thực tế
-            topics = {}
-            levels = {}
-            types = {}
-            for r in report.get("questions", []):
-                topics[str(r.get("topic") or "(Chưa gắn chủ đề)")] = topics.get(str(r.get("topic") or "(Chưa gắn chủ đề)"), 0) + 1
-                levels[str(r.get("level") or "(Chưa gắn mức độ)")] = levels.get(str(r.get("level") or "(Chưa gắn mức độ)"), 0) + 1
-                types[str(r.get("type") or "(Chưa gắn dạng)")] = types.get(str(r.get("type") or "(Chưa gắn dạng)"), 0) + 1
-            with st.expander("📊 Dashboard ma trận đề", expanded=True):
-                d1,d2,d3=st.columns(3)
-                d1.write("**Theo chủ đề**"); d1.dataframe([{"Chủ đề":k,"Số câu":v} for k,v in topics.items()],hide_index=True,use_container_width=True)
-                d2.write("**Theo mức độ**"); d2.dataframe([{"Mức độ":k,"Số câu":v} for k,v in levels.items()],hide_index=True,use_container_width=True)
-                d3.write("**Theo dạng câu**"); d3.dataframe([{"Dạng":k,"Số câu":v} for k,v in types.items()],hide_index=True,use_container_width=True)
-            if report.get("exam_issues"):
-                st.subheader("⚠️ Lỗi/cảnh báo cấp đề")
-                st.dataframe(report["exam_issues"], use_container_width=True, hide_index=True)
-            st.subheader("📋 Kết quả từng câu")
-            table=[]
-            for row in report["questions"]:
-                messages=[i["message"] for i in row["issues"] if i["severity"] != "PASS"]
-                table.append({"Câu":row["number"],"Trạng thái":row["status"],"Nội dung":row["question"],"Vấn đề":" | ".join(messages)})
-            st.dataframe(table, use_container_width=True, hide_index=True)
-            with st.expander("🔬 Chi tiết Math Engine / bằng chứng kiểm tra"):
-                for row in report["questions"]:
-                    st.markdown(f"**Câu {row['number']} — {row['status']}**")
-                    st.json(row["issues"], expanded=False)
-            st.divider()
-            st.subheader("🛠️ Sửa lỗi xác định được & thẩm định lại")
-            st.caption("Chỉ tự sửa lỗi kỹ thuật có thể xác định chắc chắn: chuẩn hóa answer_index và đồng bộ answer_index với expected_answer. Không tự ý sửa nội dung toán học.")
-            if st.button("🔧 TỰ SỬA LỖI AN TOÀN + CHẠY LẠI QA", use_container_width=True):
-                fixed_exam, changes = auto_fix_exam(exam)
-                fixed_report = audit_exam(fixed_exam)
-                st.session_state["last_exam"] = fixed_exam
-                st.session_state["last_report"] = fixed_report
-                if changes:
-                    st.success(f"Đã thực hiện {len(changes)} thay đổi xác định được.")
-                    st.code("\n".join(changes))
-                else:
-                    st.info("Không có lỗi kỹ thuật nào đủ chắc chắn để tự sửa.")
-                st.metric("QA sau sửa", fixed_report.get("status", "MANUAL_REVIEW"))
-                st.download_button("📥 Tải đề sau sửa", json.dumps(fixed_exam,ensure_ascii=False,indent=2), "de_da_tu_sua.json", "application/json", use_container_width=True)
-            report_json=json.dumps({"exam":exam,"audit":report},ensure_ascii=False,indent=2)
-            st.download_button("📥 Tải báo cáo thẩm định JSON", report_json, "bao_cao_tham_dinh_de_toan.json", "application/json", use_container_width=True)
-            csv_lines=["Câu,ID,Chủ đề,Mức độ,Dạng,Trạng thái,Vấn đề"]
-            for row in report.get("questions",[]):
-                problems=" | ".join(i["message"] for i in row["issues"] if i["severity"]!="PASS")
-                vals=[row.get("number"),row.get("id"),row.get("topic"),row.get("level"),row.get("type"),row.get("status"),problems]
-                csv_lines.append(",".join('"'+str(v).replace('"','""')+'"' for v in vals))
-            st.download_button("📊 Tải bảng kết quả CSV", "\n".join(csv_lines), "ket_qua_tham_dinh.csv", "text/csv", use_container_width=True)
-        except json.JSONDecodeError as exc:
-            st.error(f"JSON không hợp lệ: {exc}")
-        except Exception as exc:
-            st.error(f"Không thể thẩm định: {exc}")
-    st.info("Schema mẫu: exam_schema.json. Các câu chưa đủ dữ kiện kiểm chứng độc lập sẽ chuyển MANUAL_REVIEW.")
-    st.stop()
-
-if not api_key:
-    st.error("Chưa cấu hình GEMINI_API_KEY trong Secrets. Chế độ Bài giảng PowerPoint cần khóa API.")
+with st.sidebar:
+    mode = st.radio("Chế độ làm việc", ["Tạo bài giảng PowerPoint", "🏭 AI Exam Factory V4.5", "🧬 Exam Intelligence V5.0", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"], index=0)
+if not api_key and mode not in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°", "🧬 Exam Intelligence V5.0"}:
+    st.error("Chưa cấu hình GEMINI_API_KEY trong Secrets. Chế độ Thẩm định đề Toán Pro vẫn chạy offline không cần API.")
     st.stop()
 
 with st.sidebar:
@@ -616,8 +598,219 @@ with st.sidebar:
         selected_model = "models/gemini-1.5-flash"
 
 st.subheader("1. Tải tài liệu nguồn")
-uploaded = st.file_uploader("PDF, Word hoặc TXT (tối đa 20 MB)", type=["pdf", "docx", "txt"])
+uploaded = st.file_uploader("PDF, Word, TXT hoặc JSON (tối đa 20 MB)", type=["pdf", "docx", "txt", "json"])
 st.markdown('<div class="small-note">Nên dùng tài liệu chính thống: SGK, SGV, kế hoạch bài dạy hoặc chuyên đề đã kiểm duyệt.</div>', unsafe_allow_html=True)
+
+if mode == "🧬 Exam Intelligence V5.0":
+    st.subheader("🧬 Exam Intelligence V5.0 — Question DNA + Ngân hàng câu hỏi + Adaptive Exam Factory")
+    st.info("V5.0: Ngân hàng câu hỏi → Question DNA → chọn theo ma trận → Math Engine + Sư phạm → Hội đồng 3 AI → nhiều mã đề → QA liên mã → Release Gate.")
+    bank=QuestionBank("question_bank_v5.sqlite3")
+    tabA,tabB,tabC=st.tabs(["🗃️ Ngân hàng câu hỏi","🏭 Tạo đề từ ngân hàng","📊 Analytics & DNA"])
+    with tabA:
+        st.write(f"**Số câu đang lưu:** {bank.count()}")
+        bank_file=st.file_uploader("Nhập đề JSON để đưa vào ngân hàng",type=["json"],key="v5_bank_upload")
+        if st.button("➕ NẠP CÂU HỎI VÀO NGÂN HÀNG",use_container_width=True) and bank_file:
+            try:
+                ex=json.loads(bank_file.getvalue().decode("utf-8")); st.success(bank.add_exam(ex))
+            except Exception as e: st.error(str(e))
+        c1,c2,c3=st.columns(3)
+        topic_filter=c1.text_input("Lọc chủ đề",key="v5_topic")
+        level_filter=c2.text_input("Lọc mức độ",key="v5_level")
+        type_filter=c3.selectbox("Lọc loại",["","mcq","true_false","short_answer"],key="v5_type")
+        rows=bank.search(topic_filter,level_filter,type_filter,100)
+        st.dataframe([{"ID":q.get("id"),"Loại":qtype(q),"Mức độ":q.get("level"),"Chủ đề":q.get("topic"),"DNA":q.get("_dna",{}).get("fingerprint","")[:12],"Lần dùng":q.get("_uses",0)} for q in rows],use_container_width=True)
+    with tabB:
+        total_v5=st.number_input("Tổng số câu",1,60,10,key="v5_total")
+        mcq_v5=st.number_input("MCQ",0,int(total_v5),min(10,int(total_v5)),key="v5_mcq")
+        tf_v5=st.number_input("Đúng/Sai",0,int(total_v5),0,key="v5_tf")
+        short_v5=st.number_input("Trả lời ngắn",0,int(total_v5),0,key="v5_short")
+        levels_v5=st.text_input("Mức độ", "nhận biết:3, thông hiểu:3, vận dụng:3, vận dụng cao:1",key="v5_levels")
+        topics_v5=st.text_area("Chủ đề ưu tiên", "Tính đơn điệu và cực trị của hàm số",key="v5_topics")
+        codes_v5=st.number_input("Số mã đề",1,20,4,key="v5_codes")
+        if st.button("🚀 TẠO ĐỀ V5.0 + RELEASE GATE",type="primary",use_container_width=True):
+            try:
+                bp={"total_questions":int(total_v5),"type_distribution":{"mcq":int(mcq_v5),"true_false":int(tf_v5),"short_answer":int(short_v5)},"level_distribution":{}}
+                for item in levels_v5.split(','):
+                    if ':' in item:
+                        k,v=item.split(':',1); bp["level_distribution"][k.strip()]=int(v.strip())
+                bp["topic_distribution"]={x.strip():1 for x in topics_v5.splitlines() if x.strip()}
+                exam={"title":"Đề Toán V5.0","subject":"Toán","grade":grade,"blueprint":bp,"questions":select_from_bank(bank,bp)}
+                if len(exam["questions"])<int(total_v5): st.warning(f"Ngân hàng chỉ đáp ứng {len(exam['questions'])}/{int(total_v5)} câu theo bộ lọc. Có thể bổ sung câu hoặc dùng AI Factory V4.5 để sinh câu mới.")
+                mr=audit_exam(exam); pr=audit_pedagogy(exam)
+                variants=build_variants(exam,int(codes_v5)); vc=variant_consistency(variants)
+                gate=release_gate(mr,pr,[],vc); mf=build_v5_manifest(exam,variants,gate)
+                bank.mark_used(exam["questions"])
+                st.session_state["v5_exam"]=exam; st.session_state["v5_mr"]=mr; st.session_state["v5_pr"]=pr; st.session_state["v5_variants"]=variants; st.session_state["v5_manifest"]=mf
+            except Exception as e: st.error(f"V5.0 lỗi: {e}")
+        exam=st.session_state.get("v5_exam"); mr=st.session_state.get("v5_mr"); pr=st.session_state.get("v5_pr"); variants=st.session_state.get("v5_variants",[]); mf=st.session_state.get("v5_manifest",{})
+        if exam:
+            gate=mf.get("release_gate","CONDITIONAL"); a,b,c,d=st.columns(4); a.metric("Câu",len(exam.get("questions",[]))); b.metric("Gate",gate); c.metric("Mã đề",len(variants)); d.metric("DNA unique",coverage_report(exam).get("unique",0))
+            if gate=="CERTIFIED": st.success("🟢 CERTIFIED — đề vượt Release Gate V5.0 trong phạm vi các bộ máy tự động.")
+            elif gate=="REJECTED": st.error("🔴 REJECTED — cần sửa lỗi trước khi phát hành.")
+            else: st.warning("🟡 CONDITIONAL — cần giáo viên duyệt các điểm REVIEW.")
+            st.download_button("📥 Tải manifest V5.0",json.dumps(mf,ensure_ascii=False,indent=2),"manifest_v5.json","application/json",use_container_width=True)
+            st.download_button("📥 Tải đề gốc JSON",json.dumps(exam,ensure_ascii=False,indent=2),"de_goc_v5.json","application/json",use_container_width=True)
+    with tabC:
+        st.json(bank.stats())
+        qshow=bank.search(limit=20)
+        if qshow:
+            with st.expander("🧬 DNA của 20 câu gần nhất"):
+                st.json([question_dna(q) for q in qshow])
+    bank.close()
+    st.stop()
+
+if mode == "🏭 AI Exam Factory V4.5":
+    st.subheader("🏭 AI Exam Factory V4.5 — AI Exam Factory + Adaptive Intelligence")
+    st.info("Luồng V4.5: Ma trận → AI sinh đề → Math Engine → Sư phạm → 3 AI phản biện → phân tích độ khó → nhiều mã đề → QA liên mã → chứng nhận.")
+    col1,col2=st.columns(2)
+    with col1:
+        total_q=st.number_input("Tổng số câu", 1, 60, 10)
+        grade_exam=st.selectbox("Khối", ["Toán 10","Toán 11","Toán 12"], key="exam_grade")
+        topics=st.text_area("Chủ đề (mỗi dòng một chủ đề)", "Tính đơn điệu và cực trị của hàm số\nGTLN – GTNN\nHàm số mũ và logarit")
+    with col2:
+        mcq_n=st.number_input("Số MCQ",0,int(total_q),max(1,min(10,int(total_q))))
+        tf_n=st.number_input("Số Đúng/Sai",0,int(total_q),0)
+        short_n=st.number_input("Số trả lời ngắn",0,int(total_q),0)
+        levels=st.text_input("Phân bố mức độ", "nhận biết:3, thông hiểu:3, vận dụng:3, vận dụng cao:1")
+        variant_n=st.number_input("Số mã đề", 1, 8, 4, key="variant_n")
+        variant_strategy=st.selectbox("Chiến lược mã đề", ["Đảo thứ tự câu + phương án", "Biến thể tham số (AI sinh lại + kiểm chứng)"])
+    if st.button("🚀 SINH ĐỀ V4.5 + HỘI ĐỒNG 3 AI", type="primary", use_container_width=True):
+        if not selected_model: st.error("Chưa có mô hình AI.")
+        else:
+            try:
+                bp={"total_questions":int(total_q),"type_distribution":{"mcq":int(mcq_n),"true_false":int(tf_n),"short_answer":int(short_n)},"level_distribution":{}}
+                for item in levels.split(','):
+                    if ':' in item:
+                        k,v=item.split(':',1); bp["level_distribution"][k.strip()]=int(v.strip())
+                bp["topic_distribution"]={x.strip():1 for x in topics.splitlines() if x.strip()}
+                source_text=""
+                if uploaded and uploaded.name.lower().endswith((".txt",".docx")):
+                    source_text=read_source(uploaded)[0]
+                model=genai.GenerativeModel(selected_model,generation_config={"response_mime_type":"application/json","temperature":0.2})
+                with st.status("Đang chạy dây chuyền V4.0…", expanded=True) as status:
+                    st.write("1/5 AI đang sinh đề theo ma trận…")
+                    exam=parse_ai_json(model.generate_content(exam_generation_prompt(bp,source_text)).text)
+                    st.write("2/5 Math Engine kiểm chứng…")
+                    mr=audit_exam(exam)
+                    st.write("3/5 Pedagogy Engine thẩm định…")
+                    pr=audit_pedagogy(exam)
+                    council=[]
+                    for role,label in [("math","AI Toán học"),("pedagogy","AI Sư phạm"),("adversarial","AI Red-Team")]:
+                        st.write(f"4/5 {label} phản biện…")
+                        try: council.append(parse_ai_json(model.generate_content(reviewer_prompt(role,exam,mr,pr)).text))
+                        except Exception as e: council.append({"role":role,"status":"REVIEW","score":0,"findings":[{"severity":"REVIEW","finding":f"Không đọc được phản biện: {e}"}]})
+                    st.write("5/5 QA Gate + chứng nhận…")
+                    rep=combined_v4_report(exam,mr,pr,council)
+                    adaptive=analyze_exam(exam)
+                    variants=[exam]
+                    import copy, random
+                    for vi in range(1,int(variant_n)):
+                        vv=copy.deepcopy(exam)
+                        rng=random.Random(1000+vi)
+                        rng.shuffle(vv.get("questions",[]))
+                        for q in vv.get("questions",[]):
+                            if q.get("type","mcq")=="mcq" and isinstance(q.get("options"),list) and len(q["options"])==4:
+                                old_opts=list(q["options"]); old_ans=q.get("answer_index")
+                                order=list(range(4)); rng.shuffle(order)
+                                q["options"]=[old_opts[i] for i in order]
+                                if isinstance(old_ans,int): q["answer_index"]=order.index(old_ans)
+                        vv["variant_code"]=chr(66+vi) if vi<25 else f"V{vi+1}"
+                        variants.append(vv)
+                    manifest=build_manifest(variants,rep)
+                    manifest["adaptive_analysis"]=adaptive
+                    st.session_state["v4_exam"]=exam; st.session_state["v4_report"]=rep; st.session_state["v45_variants"]=variants; st.session_state["v45_manifest"]=manifest
+                    status.update(label="Hoàn tất dây chuyền V4.5",state="complete",expanded=False)
+            except Exception as e: st.error(f"V4.0 gặp lỗi: {e}")
+    exam=st.session_state.get("v4_exam"); rep=st.session_state.get("v4_report")
+    if exam and rep:
+        c1,c2,c3=st.columns(3); c1.metric("QA Score",rep["summary"]["score"]); c2.metric("Trạng thái",rep["status"]); c3.metric("Chứng nhận",rep["certificate"]["certificate_status"])
+        if rep["status"]=="PASS": st.success("🟢 CERTIFIED — đề vượt qua Gate V4.0 trong phạm vi các bộ máy kiểm tra.")
+        elif rep["status"]=="FAIL": st.error("🔴 REJECTED — còn lỗi FAIL, không nên phát hành.")
+        else: st.warning("🟡 CONDITIONAL — cần giáo viên duyệt các điểm REVIEW.")
+        for c in rep["council"]:
+            with st.expander(f"{c.get('role','Reviewer')} — {c.get('status','REVIEW')} — {c.get('score',0)}"):
+                st.json(c)
+        with st.expander("🔐 Chứng nhận & dấu vết phiên bản"): st.json(rep["certificate"])
+        st.download_button("📥 JSON báo cáo V4.0",json.dumps({"exam":exam,"report":rep},ensure_ascii=False,indent=2),"bao_cao_V4_0.json","application/json",use_container_width=True)
+        st.download_button("📝 Xuất Word đề",build_exam_docx(exam,rep["certificate"]),"de_toan_V4_0.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",use_container_width=True)
+        st.download_button("📊 Xuất PowerPoint đề",build_exam_pptx(exam,theme_name,False),"de_toan_V4_0.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
+        variants=st.session_state.get("v45_variants",[exam]); manifest=st.session_state.get("v45_manifest",{})
+        st.markdown("### 🧠 Adaptive Intelligence")
+        ad=manifest.get("adaptive_analysis",{})
+        ac1,ac2,ac3=st.columns(3); ac1.metric("Độ khó heuristic TB",ad.get("summary",{}).get("avg_difficulty",0)); ac2.metric("Biên độ độ khó",ad.get("summary",{}).get("spread",0)); ac3.metric("Số mã đề",len(variants))
+        st.caption("Điểm độ khó là heuristic hỗ trợ biên tập, không phải chỉ số tâm trắc học.")
+        vc=variant_consistency(variants); st.write(f"**QA liên mã:** {vc['status']} — {len(vc.get('issues',[]))} cảnh báo")
+        if vc.get("issues"): st.dataframe(vc["issues"],use_container_width=True)
+        st.download_button("📦 Tải manifest + QA nhiều mã",json.dumps(manifest,ensure_ascii=False,indent=2),"manifest_v4_5.json","application/json",use_container_width=True)
+    st.stop()
+
+if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"}:
+    st.subheader("2. Hệ thống thẩm định đề Toán 360°")
+    st.info("V3.5: Math Engine + kiểm tra cấu trúc + ma trận + miền xác định + trùng/gần trùng + chất lượng sư phạm + QA Gate. Các tiêu chí heuristic chỉ đưa ra REVIEW, không tự kết luận thay giáo viên.")
+    json_text = st.text_area("Dán trực tiếp JSON của đề", height=220, placeholder='{"questions": [...], "blueprint": {...}}')
+    if st.button("🛡️ CHẠY THẨM ĐỊNH 360°", type="primary", use_container_width=True) and (uploaded or json_text.strip()):
+        try:
+            if json_text.strip(): exam=json.loads(json_text)
+            else: exam=json.loads(uploaded.getvalue().decode("utf-8"))
+            math_report=audit_exam(exam)
+            ped_report=audit_pedagogy(exam)
+            # Conservative combined gate: any deterministic FAIL keeps the exam FAIL.
+            all_issues=math_report["exam_issues"]+ped_report["exam_issues"]
+            combined_status="FAIL" if math_report["status"]=="FAIL" or ped_report["status"]=="FAIL" else "MANUAL_REVIEW" if math_report["status"]=="MANUAL_REVIEW" or ped_report["status"]=="MANUAL_REVIEW" else "PASS"
+            combined_score=round((math_report["summary"]["score"]+ped_report["summary"]["score"])/2,1)
+            st.session_state["exam_current"]=exam
+            st.session_state["audit_report"]={"status":combined_status,"summary":{"total":len(exam.get("questions",[])),"pass":math_report["summary"]["pass"],"fail":max(math_report["summary"]["fail"],ped_report["summary"]["fail"]),"manual_review":max(math_report["summary"]["manual_review"],ped_report["summary"]["manual_review"]),"score":combined_score},"math":math_report,"pedagogy":ped_report,"exam_issues":all_issues}
+        except Exception as e:
+            st.error(f"Không đọc được đề JSON: {e}")
+    report=st.session_state.get("audit_report")
+    exam=st.session_state.get("exam_current")
+    if report:
+        sm=report["summary"]
+        c1,c2,c3,c4,c5=st.columns(5)
+        c1.metric("Tổng câu",sm["total"]); c2.metric("PASS",sm["pass"]); c3.metric("FAIL",sm["fail"]); c4.metric("REVIEW",sm["manual_review"]); c5.metric("360 Score",sm["score"])
+        if report["status"]=="PASS": st.success("🟢 ĐỀ ĐẠT – qua cả kiểm tra Toán và kiểm tra sư phạm tự động.")
+        elif report["status"]=="FAIL": st.error("🔴 ĐỀ KHÔNG ĐẠT – phải sửa lỗi FAIL trước khi phát hành.")
+        else: st.warning("🟡 ĐỀ CẦN DUYỆT – có tiêu chí cần giáo viên thẩm định thủ công.")
+        tab1,tab2,tab3=st.tabs(["🧮 Math Engine","🎓 Sư phạm 360°","📋 QA Gate"])
+        with tab1:
+            mr=report["math"]
+            st.write(f"Trạng thái: **{mr['status']}** · QA Score: **{mr['summary']['score']}**")
+            if mr["exam_issues"]: st.dataframe(mr["exam_issues"],use_container_width=True)
+            table=[]
+            for r in mr["questions"]: table.append({"Câu":r["number"],"Mức độ":r["level"],"Chủ đề":r["topic"],"Trạng thái":r["status"],"Số lỗi":len(r["issues"])})
+            st.dataframe(table,use_container_width=True)
+            with st.expander("🔎 Chi tiết Math Engine"):
+                for r in mr["questions"]:
+                    st.markdown(f"**Câu {r['number']} — {r['status']}**")
+                    for x in r["issues"]: st.write(f"• {x['severity']} | {x['code']}: {x['message']} {x['evidence']}")
+        with tab2:
+            pr=report["pedagogy"]
+            st.write(f"Trạng thái: **{pr['status']}** · Pedagogy Score: **{pr['summary']['score']}**")
+            if pr["exam_issues"]: st.dataframe(pr["exam_issues"],use_container_width=True)
+            ptable=[]
+            for r in pr["questions"]: ptable.append({"Câu":r["number"],"Loại":r["type"],"Mức độ":r["level"],"Chủ đề":r["topic"],"Trạng thái":r["status"],"Số cảnh báo":len(r["issues"])})
+            st.dataframe(ptable,use_container_width=True)
+            with st.expander("🔎 Chi tiết kiểm tra sư phạm"):
+                for r in pr["questions"]:
+                    st.markdown(f"**Câu {r['number']} — {r['status']}**")
+                    for x in r["issues"]: st.write(f"• {x['severity']} | {x['code']}: {x['message']} {x['evidence']}")
+            st.caption("Lưu ý: kiểm tra mức độ nhận thức là heuristic hỗ trợ giáo viên; không phải phép đo tâm lý học hay thay thế thẩm định chuyên môn.")
+        with tab3:
+            st.markdown("**Nguyên tắc QA Gate:** FAIL = chặn phát hành; REVIEW = cần giáo viên duyệt; PASS = không phát hiện lỗi trong phạm vi engine.")
+            if report["exam_issues"]: st.dataframe(report["exam_issues"],use_container_width=True)
+            st.json({"status":report["status"],"summary":report["summary"]})
+        if st.button("🔧 TỰ SỬA LỖI KỸ THUẬT + THẨM ĐỊNH 360° LẦN 2", use_container_width=True):
+            fixed,changes=safe_autofix(exam)
+            new_math=audit_exam(fixed); new_ped=audit_pedagogy(fixed)
+            combined_status="FAIL" if new_math["status"]=="FAIL" or new_ped["status"]=="FAIL" else "MANUAL_REVIEW" if new_math["status"]=="MANUAL_REVIEW" or new_ped["status"]=="MANUAL_REVIEW" else "PASS"
+            combined={"status":combined_status,"summary":{"total":len(fixed.get("questions",[])),"pass":new_math["summary"]["pass"],"fail":max(new_math["summary"]["fail"],new_ped["summary"]["fail"]),"manual_review":max(new_math["summary"]["manual_review"],new_ped["summary"]["manual_review"]),"score":round((new_math["summary"]["score"]+new_ped["summary"]["score"])/2,1)},"math":new_math,"pedagogy":new_ped,"exam_issues":new_math["exam_issues"]+new_ped["exam_issues"]}
+            st.session_state["exam_current"]=fixed; st.session_state["audit_report"]=combined
+            st.success(f"Đã sửa {len(changes)} lỗi kỹ thuật xác định chắc chắn.")
+            if changes: st.code("\n".join(changes))
+            st.rerun()
+        payload={"version":"3.5.0","exam":exam,"audit":report}
+        st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v3_5.json","application/json",use_container_width=True)
+    st.stop()
 
 st.subheader("2. Tạo bài giảng")
 if st.button("🚀 Phân tích và tạo PowerPoint", type="primary", use_container_width=True, disabled=uploaded is None):
