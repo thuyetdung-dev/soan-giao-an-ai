@@ -20,7 +20,7 @@ def difficulty_score(q):
     text=norm(q.get("question")); level=LEVEL_WEIGHT.get(norm(q.get("level")),1)
     score=18+level*14
     score += min(22, max(0, len(text)-80)/25)
-    signals=["tham số","biện luận","tối ưu","chứng minh","tất cả","m\b","kết hợp","suy luận"]
+    signals=["tham số","biện luận","tối ưu","chứng minh","tất cả",r"\bm\b","kết hợp","suy luận"]
     score += sum(5 for s in signals if re.search(s,text))
     if question_type(q)=="mcq": score += 3
     if question_type(q)=="true_false": score += 4
