@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import re
+import math
 from collections import Counter
 from typing import Any
 from equation_engine import formula_diagnostics
+try:
+    import sympy as sp
+except Exception:
+    sp = None
 
 ACTIVITIES = ["KHỞI ĐỘNG", "HÌNH THÀNH KIẾN THỨC", "LUYỆN TẬP", "VẬN DỤNG", "CỦNG CỐ"]
 LAYOUTS = {"section", "concept", "process", "example", "practice", "compare", "visual", "quiz", "summary", "content"}
@@ -12,6 +17,71 @@ LAYOUTS = {"section", "concept", "process", "example", "practice", "compare", "v
 
 def _text(value: Any, limit: int = 2000) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+INLINE_REPLACEMENTS={
+    r"\infty":"∞",r"\leq":"≤",r"\le":"≤",r"\geq":"≥",r"\ge":"≥",r"\neq":"≠",r"\ne":"≠",
+    r"\Leftrightarrow":"⇔",r"\Rightarrow":"⇒",r"\rightarrow":"→",r"\backslash":"∖",r"\in":"∈",r"\pm":"±",r"\cdot":"·",r"\times":"×"
+}
+
+
+def _clean_inline_math(text: str) -> str:
+    out=str(text)
+    for _ in range(3):
+        out=re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}",r"(\1)/(\2)",out)
+        out=re.sub(r"\\sqrt\{([^{}]+)\}",r"√(\1)",out)
+    for old,new in INLINE_REPLACEMENTS.items(): out=out.replace(old,new)
+    out=out.replace(r"\{","{").replace(r"\}","}")
+    return out
+
+
+def _split_math_bullets(bullets: list[str], formulas: list[str]) -> tuple[list[str],list[str]]:
+    clean=[]; maths=list(formulas)
+    for raw in bullets:
+        item=str(raw)
+        if re.search(r"\\(?:frac|sqrt|begin\{|sum|int)",item):
+            if ":" in item:
+                prefix,formula=item.split(":",1); clean.append(_clean_inline_math(prefix.strip()+":")); maths.append(formula.strip().rstrip("."))
+            else: maths.append(item.strip().rstrip("."))
+        else: clean.append(_clean_inline_math(item))
+    return clean,maths
+
+
+def verify_variation_table(data: Any) -> tuple[bool,str]:
+    if not isinstance(data,dict): return False,"Bảng biến thiên không đúng cấu trúc."
+    points=data.get("points",[]); signs=data.get("interval_signs",[]); values=data.get("values",[]); expression=str(data.get("expression","")).strip()
+    if len(points)<2 or len(signs)!=len(points)-1 or len(values)!=len(points): return False,"Số điểm, khoảng dấu và giá trị không khớp."
+    if not expression: return False,"Thiếu expression để kiểm chứng độc lập bảng biến thiên."
+    if sp is None: return False,"Máy chủ chưa có SymPy để kiểm chứng bảng biến thiên."
+    try:
+        x=sp.Symbol("x", real=True); expr=sp.sympify(expression.replace("^","**"),locals={"x":x,"sin":sp.sin,"cos":sp.cos,"tan":sp.tan,"sqrt":sp.sqrt,"log":sp.log,"exp":sp.exp})
+        deriv=sp.diff(expr,x); numeric=[]
+        for p in points:
+            s=str(p).strip().replace("−","-")
+            if "∞" in s or "infty" in s: numeric.append(None)
+            else:
+                try: numeric.append(float(sp.N(sp.sympify(s))))
+                except Exception: numeric.append(None)
+        for i,want in enumerate(signs):
+            left,right=numeric[i],numeric[i+1]
+            sample=(left+right)/2 if left is not None and right is not None else (right-1 if right is not None else left+1 if left is not None else 0)
+            got=float(sp.N(deriv.subs(x,sample)))
+            expected=str(want).strip().replace("−","-")
+            if expected=="+" and got<=1e-8: return False,f"Dấu đạo hàm sai trên khoảng thứ {i+1}."
+            if expected=="-" and got>=-1e-8: return False,f"Dấu đạo hàm sai trên khoảng thứ {i+1}."
+        for i,(point,want) in enumerate(zip(numeric,values),1):
+            if point is None or want in (None,""): continue
+            actual=sp.N(expr.subs(x,point))
+            if actual in (sp.zoo,sp.oo,-sp.oo) or getattr(actual,"is_finite",None) is False: continue
+            wanted=str(want).strip().replace("−","-").replace("∞","oo")
+            try:
+                expected_value=float(sp.N(sp.sympify(wanted)))
+                if not math.isclose(float(actual),expected_value,rel_tol=1e-7,abs_tol=1e-7):
+                    return False,f"Giá trị hàm số sai tại mốc thứ {i}."
+            except (TypeError,ValueError,sp.SympifyError):
+                return False,f"Không đọc được giá trị tại mốc thứ {i}."
+        return True,"Đã kiểm chứng dấu đạo hàm và giá trị hàm số từ expression."
+    except Exception as exc: return False,f"Không kiểm chứng được bảng biến thiên: {exc}"
 
 
 def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
@@ -30,18 +100,19 @@ def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
         formulas = raw.get("formulas", [])
         if not isinstance(formulas, list):
             formulas = [formulas]
+        bullets,formulas=_split_math_bullets([_text(x,550) for x in bullets[:8] if _text(x)],[_text(x,500) for x in formulas[:4] if _text(x)])
         activity = _text(raw.get("activity") or "HÌNH THÀNH KIẾN THỨC", 60).upper()
         layout = _text(raw.get("layout") or "content", 30).lower()
         slides.append({
-            "title": _text(raw.get("title") or "Nội dung bài học", 160),
-            "subtitle": _text(raw.get("subtitle"), 260),
+            "title": _clean_inline_math(_text(raw.get("title") or "Nội dung bài học", 160)),
+            "subtitle": _clean_inline_math(_text(raw.get("subtitle"), 260)),
             "activity": activity if activity in ACTIVITIES else "HÌNH THÀNH KIẾN THỨC",
             "layout": layout if layout in LAYOUTS else "content",
-            "bullets": [_text(x, 550) for x in bullets[:8] if _text(x)],
-            "formulas": [_text(x, 500) for x in formulas[:4] if _text(x)],
-            "question": _text(raw.get("question"), 800),
-            "product": _text(raw.get("product"), 500),
-            "answer": _text(raw.get("answer"), 1600),
+            "bullets": bullets,
+            "formulas": formulas[:6],
+            "question": _clean_inline_math(_text(raw.get("question"), 800)),
+            "product": _clean_inline_math(_text(raw.get("product"), 500)),
+            "answer": _clean_inline_math(_text(raw.get("answer"), 1600)),
             "teacher_note": _text(raw.get("teacher_note"), 1600),
             "source_ref": _text(raw.get("source_ref"), 500),
             "graph": raw.get("graph") if isinstance(raw.get("graph"), dict) else None,
@@ -78,6 +149,15 @@ def audit_lesson(lesson: dict, requested_slides: int, source_text: str = "") -> 
         if s.get("layout") in {"practice","quiz"} and not s.get("question"): row.append("Thiếu câu hỏi/nhiệm vụ")
         if s.get("layout") in {"practice","quiz"} and not s.get("product"): row.append("Chưa nêu sản phẩm học tập")
         for formula in s.get("formulas",[]): row.extend(formula_diagnostics(formula))
+        prose=" ".join([s.get("title",""),s.get("subtitle",""),*s.get("bullets",[]),s.get("question",""),s.get("product",""),s.get("answer","")])
+        if re.search(r"\\[A-Za-z]+",prose):
+            row.append("Còn lệnh LaTeX thô trong vùng văn bản")
+            issues.append({"severity":"FAIL","code":"RAW_LATEX_IN_TEXT","message":f"Slide {i}: còn lệnh LaTeX trong textbox."})
+        if s.get("variation_table"):
+            ok,detail=verify_variation_table(s["variation_table"])
+            if not ok:
+                row.append("Bảng biến thiên chưa đạt: "+detail)
+                issues.append({"severity":"FAIL","code":"UNVERIFIED_VARIATION_TABLE","message":f"Slide {i}: {detail}"})
         if source_text.strip() and not s.get("source_ref"): row.append("Chưa ghi tham chiếu nguồn trong Notes")
         rows.append({"slide":i,"title":s.get("title"),"status":"REVIEW" if row else "PASS","issues":row})
     if source_text.strip():
@@ -88,4 +168,4 @@ def audit_lesson(lesson: dict, requested_slides: int, source_text: str = "") -> 
     review_rows=sum(r["status"]=="REVIEW" for r in rows)
     status="FAIL" if any(i["severity"]=="FAIL" for i in issues) else "REVIEW" if issues or review_rows else "PASS"
     score=max(0,100-12*sum(i["severity"]=="FAIL" for i in issues)-5*sum(i["severity"]=="REVIEW" for i in issues)-2*review_rows)
-    return {"version":"6.0.0","status":status,"score":score,"summary":{"slides":len(slides),"activities":dict(activities),"layouts":dict(layouts),"slides_to_review":review_rows},"issues":issues,"slides":rows}
+    return {"version":"7.1.0","status":status,"score":score,"summary":{"slides":len(slides),"activities":dict(activities),"layouts":dict(layouts),"slides_to_review":review_rows},"issues":issues,"slides":rows}
