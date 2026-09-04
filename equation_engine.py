@@ -40,7 +40,7 @@ def formula_diagnostics(text: str) -> list[str]:
             while i<len(s) and s[i].isalpha(): i+=1
             if start<i: commands.append(s[start:i])
         else: i+=1
-    unknown=sorted({c for c in commands if c not in SYMBOLS and c not in {"frac","sqrt","text"}})
+    unknown=sorted({c for c in commands if c not in SYMBOLS and c not in {"frac","sqrt","text","begin","end","begincases","endcases"}})
     if unknown: issues.append("Lệnh LaTeX chưa hỗ trợ: "+", ".join(unknown))
     return issues
 
@@ -53,7 +53,13 @@ class Node:
 
 
 class Parser:
-    def __init__(self, text: str): self.s=text.strip().strip("$"); self.i=0
+    def __init__(self, text: str):
+        value=text.strip().strip("$")
+        value=value.replace(r"\begin{cases}", "{ ").replace(r"\end{cases}", "")
+        value=value.replace(r"\begincases", "{ ").replace(r"\endcases", "")
+        value=value.replace(r"\begin{aligned}", "").replace(r"\end{aligned}", "")
+        value=value.replace(r"\\", " ; ").replace("&", "")
+        self.s=value; self.i=0
     def parse(self, stop: str = "") -> list[Node]:
         out=[]; buf=""
         def flush():
