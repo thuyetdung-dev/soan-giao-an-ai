@@ -18,7 +18,7 @@ import google.generativeai as genai
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Inches, Pt
 from audit_engine import audit_exam, safe_autofix
 from adaptive_engine import analyze_exam, variant_consistency, build_manifest
@@ -26,12 +26,12 @@ from pedagogy_engine import audit_pedagogy
 from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json, certificate
 from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
-from lesson_engine import normalize_lesson, audit_lesson
+from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table
 from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "7.0.0 (Math Premium + Exam Intelligence V5)"
+APP_VERSION = "7.1.0 Stable (Math Safety Gate + Exam Intelligence V5)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -315,7 +315,7 @@ NGUYÊN TẮC NỘI DUNG:
 
 ĐỒ HỌA TÙY CHỌN:
 - graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
-- variation_table: {{"points":["-∞","-1","1","+∞"], "interval_signs":["+","-","+"], "values":["-∞","2","-2","+∞"]}}.
+- variation_table: {{"expression":"x**3-3*x", "points":["-∞","-1","1","+∞"], "interval_signs":["+","-","+"], "values":["-∞","2","-2","+∞"]}}. Trường expression là bắt buộc và phải là biểu thức Python/SymPy tương ứng đúng với hàm số để hệ thống tự kiểm chứng bảng.
 
 Trả về duy nhất JSON chuẩn:
 {{
@@ -392,7 +392,8 @@ def add_header(slide, title: str, activity: str, theme: dict[str, tuple[int, int
     primary = theme["primary"]
     bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(.18))
     bar.fill.solid(); bar.fill.fore_color.rgb = RGBColor(*primary); bar.line.fill.background()
-    add_text(slide, title, .72, .38, 11.8, .7, 27, primary, True)
+    title_size=27 if len(title)<=58 else 24 if len(title)<=78 else 21
+    add_text(slide, title, .72, .34, 11.8, .82, title_size, primary, True,valign=MSO_ANCHOR.MIDDLE)
     activity_color = ACTIVITY_COLORS.get(activity, theme["accent"])
     pill = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.75), Inches(1.08), Inches(3.1), Inches(.42))
     pill.fill.solid(); pill.fill.fore_color.rgb = RGBColor(*activity_color); pill.line.fill.background()
@@ -406,6 +407,7 @@ def add_bullets(slide, bullets: list[str], left: float, top: float, width: float
     frame.clear()
     # Kích hoạt Word Wrap của PPT
     frame.word_wrap = True
+    frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     frame.margin_left = Inches(.08); frame.margin_right = Inches(.08)
     
     # Gộp toàn bộ đoạn văn vào CHUNG MỘT Textbox để hỗ trợ hiệu ứng (Animation By Paragraph)
@@ -421,10 +423,12 @@ def add_bullets(slide, bullets: list[str], left: float, top: float, width: float
     return box
 
 def add_answer_box(slide, answer: str, theme):
-    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.82), Inches(5.72), Inches(11.7), Inches(.92))
+    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.82), Inches(5.58), Inches(11.7), Inches(1.12))
     shape.fill.solid(); shape.fill.fore_color.rgb = RGBColor(*theme["light"])
     shape.line.color.rgb = RGBColor(*theme["accent"])
-    add_text(slide, "ĐÁP ÁN/GỢI Ý: " + answer, 1.0, 5.9, 11.3, .55, 16, theme["primary"], True)
+    size = 14 if len(answer) < 260 else 12
+    box = add_text(slide, "ĐÁP ÁN/GỢI Ý: " + answer, 1.0, 5.72, 11.3, .82, size, theme["primary"], True)
+    box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
 
 def add_panel(slide, left, top, width, height, fill, line=None, radius=True):
@@ -447,12 +451,16 @@ def add_formula_block(slide, formulas: list[str], left: float, top: float, width
 
 def add_learning_task(slide, slide_data, theme, top=4.85):
     question=slide_data.get("question",""); product=slide_data.get("product","")
+    longest=max(len(question),len(product)); panel_h=1.02 if longest>85 else .82
+    font_size=13 if longest>120 else 14 if longest>80 else 15
     if question:
-        add_panel(slide,.82,top,7.6,.72,theme["light"],theme["accent"])
-        add_text(slide,"NHIỆM VỤ  •  "+question,1.02,top+.13,7.2,.43,16,theme["primary"],True)
+        add_panel(slide,.82,top,7.6,panel_h,theme["light"],theme["accent"])
+        task_box=add_text(slide,"NHIỆM VỤ  •  "+question,1.02,top+.1,7.2,panel_h-.18,font_size,theme["primary"],True,valign=MSO_ANCHOR.MIDDLE)
+        task_box.text_frame.auto_size=MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     if product:
-        add_panel(slide,8.65,top,3.87,.72,(248,249,250),(205,211,217))
-        add_text(slide,"SẢN PHẨM  •  "+product,8.83,top+.13,3.5,.43,14,(55,65,72),True)
+        add_panel(slide,8.65,top,3.87,panel_h,(248,249,250),(205,211,217))
+        product_box=add_text(slide,"SẢN PHẨM  •  "+product,8.83,top+.1,3.5,panel_h-.18,max(12,font_size-1),(55,65,72),True,valign=MSO_ANCHOR.MIDDLE)
+        product_box.text_frame.auto_size=MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
 
 def add_native_variation_table(slide, data, left, top, width, height, theme):
@@ -530,15 +538,21 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
                     visual = create_graph(slide_data["graph"])
                 except (ValueError, SyntaxError, TypeError):
                     visual = None
-            native_variation = chunk_index == 0 and bool(slide_data.get("variation_table"))
+            variation_ok,_variation_detail=verify_variation_table(slide_data.get("variation_table")) if slide_data.get("variation_table") else (False,"")
+            native_variation = chunk_index == 0 and variation_ok
 
             has_answer = config.include_answers and bool(slide_data.get("answer"))
             content_bottom = 5.48 if has_answer else 6.78
             formulas=slide_data.get("formulas",[])
 
             if native_variation:
-                add_bullets(slide,chunk,.82,1.65,11.7,1.2,18)
-                add_native_variation_table(slide,slide_data["variation_table"],.82,2.85,11.7,2.45,theme)
+                add_bullets(slide,chunk[:2],.82,1.55,11.7,.42,14)
+                if formulas: add_formula_block(slide,formulas[:1],2.15,1.98,9.0,theme)
+                variation_image=create_variation_table(slide_data["variation_table"])
+                if variation_image:
+                    slide.shapes.add_picture(variation_image,Inches(.82),Inches(2.85),width=Inches(11.7),height=Inches(1.68))
+                else:
+                    add_native_variation_table(slide,slide_data["variation_table"],.82,2.85,11.7,1.68,theme)
             elif layout=="process" and len(chunk)>=2:
                 step_w=11.55/min(4,len(chunk))
                 for idx,item in enumerate(chunk[:4]):
@@ -569,7 +583,7 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
                 if formulas: add_formula_block(slide,formulas,2.15,max(3.75,body_bottom-.9),9.0,theme)
 
             if (slide_data.get("question") or slide_data.get("product")) and layout not in {"concept","example","compare"}:
-                add_learning_task(slide,slide_data,theme,4.78 if not has_answer else 4.72)
+                add_learning_task(slide,slide_data,theme,4.56 if native_variation else 4.55 if has_answer else 4.78)
                 
             if has_answer:
                 add_answer_box(slide, slide_data["answer"], theme)
@@ -962,7 +976,8 @@ if lesson_data and config and report:
     try:
         pptx_bytes=build_pptx(lesson_data,config)
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename=f"{safe_name[:70]}_LessonStudioV7_MathPremium.pptx"
-        st.download_button("📥 TẢI POWERPOINT MATH PREMIUM V7",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
+        filename=f"{safe_name[:70]}_LessonStudioV7_1_MathPremium_Stable.pptx"
+        st.download_button("📥 TẢI POWERPOINT MATH PREMIUM V7.1",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=report["status"]=="FAIL")
+        if report["status"]=="FAIL": st.error("Đã khóa xuất PowerPoint vì còn lỗi nghiêm trọng. Hãy sửa JSON hoặc tạo lại cấu trúc.")
         st.download_button("📋 TẢI BÁO CÁO KIỂM ĐỊNH",json.dumps(report,ensure_ascii=False,indent=2),f"{safe_name[:70]}_QA.json","application/json",use_container_width=True)
     except Exception as exc: st.error(f"Không thể dựng PowerPoint: {exc}")
