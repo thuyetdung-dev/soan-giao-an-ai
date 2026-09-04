@@ -21,7 +21,7 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
-APP_VERSION = "2.0.2 (Smart Layout)"
+APP_VERSION = "2.0.3 (Smart Wrap & Math Protect)"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -58,13 +58,29 @@ class LessonConfig:
 def clean_text(value: Any) -> str:
     text = str(value or "")
     text = re.sub(r"\s+", " ", text).strip()
+    
+    # 1. Khắc phục lỗi dư dấu gạch chéo ngược (R \\ {-2} -> R \ {-2})
+    text = text.replace('\\\\', '\\')
+    
+    # 2. Định dạng Unicode toán học
     replacements = {"<=>": "⇔", "=>": "⇒", ">=": "≥", "<=": "≤", "+-": "±"}
     for old, new in replacements.items():
         text = text.replace(old, new)
+        
     superscripts = str.maketrans("0123456789-+", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺")
     subscripts = str.maketrans("0123456789-+", "₀₁₂₃₄₅₆₇₈₉₋₊")
     text = re.sub(r"\^\{?(-?\d+)\}?", lambda m: m.group(1).translate(superscripts), text)
     text = re.sub(r"_\{?(-?\d+)\}?", lambda m: m.group(1).translate(subscripts), text)
+    
+    # 3. KEO TÀNG HÌNH BẢO VỆ CÔNG THỨC TOÁN
+    # Dùng Non-Breaking Space (\xA0) thay cho khoảng trắng để PPT không bị cắt chữ nửa chừng
+    math_ops = ['=', '≤', '≥', '∈', '∉', '≠', '⇔', '⇒', '±', '+', '-', '×', '÷', '<', '>']
+    for op in math_ops:
+        text = text.replace(f" {op} ", f"\xA0{op}\xA0")
+    
+    # Bảo vệ riêng ký hiệu hiệu tập hợp (VD: R \ {-2})
+    text = text.replace(" \\ ", "\xA0\\\xA0")
+    
     return text
 
 def extract_docx(data: bytes) -> str:
@@ -361,7 +377,7 @@ def add_text(slide, text: str, left: float, top: float, width: float, height: fl
     frame.margin_top = frame.margin_bottom = Inches(.04)
     frame.vertical_anchor = valign
     p = frame.paragraphs[0]
-    p.text = clean_text(text)
+    p.text = text
     p.alignment = align
     p.font.name = font
     p.font.size = Pt(size)
@@ -384,8 +400,12 @@ def add_bullets(slide, bullets: list[str], left: float, top: float, width: float
                 font_size: int = 21):
     box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
     frame = box.text_frame
-    frame.clear(); frame.word_wrap = True
+    frame.clear()
+    # Kích hoạt Word Wrap của PPT
+    frame.word_wrap = True
     frame.margin_left = Inches(.08); frame.margin_right = Inches(.08)
+    
+    # Gộp toàn bộ đoạn văn vào CHUNG MỘT Textbox để hỗ trợ hiệu ứng (Animation By Paragraph)
     for i, bullet in enumerate(bullets):
         p = frame.paragraphs[0] if i == 0 else frame.add_paragraph()
         p.text = clean_text(bullet)
@@ -443,10 +463,11 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
             content_bottom = 5.48 if has_answer else 6.78
             
             if visual:
-                # Đẩy hộp chữ lý thuyết sang trái, nới rộng không gian hiển thị text
-                add_bullets(slide, chunk, .75, 1.72, 7.2, content_bottom - 1.72, 21)
+                # ÉP CHIỀU RỘNG CHỮ TỐI ĐA LÀ 7.0 INCH (~1/2 trang theo chiều ngang)
+                # Chữ chạy tới mốc này sẽ TỰ ĐỘNG rớt dòng, hoàn toàn không che lấp Hình bên phải.
+                add_bullets(slide, chunk, .75, 1.72, 7.0, content_bottom - 1.72, 21)
                 
-                # Cố định Đồ thị / Bảng biến thiên ở góc trên bên phải, song song với nút Hoạt động
+                # Cố định hình vẽ/bảng biến thiên ở góc trên bên phải
                 slide.shapes.add_picture(visual, Inches(8.2), Inches(1.08), width=Inches(4.8))
             else:
                 size = 23 if sum(map(len, chunk)) < 280 else 21
@@ -477,7 +498,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 st.title("📐 Trợ lý soạn PowerPoint Toán THPT")
-st.caption(f"Phiên bản {APP_VERSION} • Đồ họa Toán học AST • Kết nối API Tối ưu")
+st.caption(f"Phiên bản {APP_VERSION} • Đồ họa Toán học AST • Chống rớt chữ")
 
 api_key = get_api_key()
 if not api_key:
