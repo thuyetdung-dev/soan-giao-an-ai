@@ -6,4 +6,5 @@ matplotlib>=3.9,<4
 numpy>=2.0,<3
 sympy>=1.13,<2
 reportlab>=4.2,<5
+
 jsonschema>=4.20,<5
