@@ -68,6 +68,13 @@ def variant_consistency(variants):
         if levels!=base_levels: issues.append(f"Mã {idx}: lệch phân bố mức độ")
         types=Counter(question_type(q) for q in v.get("questions",[])); base_types=Counter(question_type(q) for q in base.get("questions",[]))
         if types!=base_types: issues.append(f"Mã {idx}: lệch phân bố loại câu")
+        for q in v.get("questions",[]):
+            if question_type(q)=="mcq":
+                ans=q.get("answer_index"); check=q.get("check") or {}
+                if not isinstance(ans,int) or ans not in range(4):
+                    issues.append(f"Mã {idx}: {q.get('id','?')} có answer_index không hợp lệ")
+                if str(check.get("type","")).lower()=="mcq_index" and check.get("correct_index")!=ans:
+                    issues.append(f"Mã {idx}: {q.get('id','?')} lệch correct_index")
     return {"status":"FAIL" if issues else "PASS","issues":issues}
 
 def fingerprint(exam):

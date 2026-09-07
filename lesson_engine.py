@@ -6,6 +6,7 @@ import math
 from collections import Counter
 from typing import Any
 from equation_engine import formula_diagnostics
+from safe_math_parser import SafeMathError, parse_math_expression, parse_numeric
 try:
     import sympy as sp
 except Exception:
@@ -54,33 +55,63 @@ def verify_variation_table(data: Any) -> tuple[bool,str]:
     if not expression: return False,"Thiếu expression để kiểm chứng độc lập bảng biến thiên."
     if sp is None: return False,"Máy chủ chưa có SymPy để kiểm chứng bảng biến thiên."
     try:
-        x=sp.Symbol("x", real=True); expr=sp.sympify(expression.replace("^","**"),locals={"x":x,"sin":sp.sin,"cos":sp.cos,"tan":sp.tan,"sqrt":sp.sqrt,"log":sp.log,"exp":sp.exp})
+        x=sp.Symbol("x", real=True)
+        expr=parse_math_expression(expression, {"x":x})
+        if expr.free_symbols - {x}: return False,"Biểu thức chứa biến ngoài x."
         deriv=sp.diff(expr,x); numeric=[]
         for p in points:
             s=str(p).strip().replace("−","-")
             if "∞" in s or "infty" in s: numeric.append(None)
             else:
-                try: numeric.append(float(sp.N(sp.sympify(s))))
+                try: numeric.append(float(sp.N(parse_numeric(s))))
                 except Exception: numeric.append(None)
+        if any(str(s).strip().replace("−","-") not in {"+","-"} for s in signs):
+            return False,"Mỗi khoảng phải có dấu đạo hàm + hoặc -."
+        finite=[v for v in numeric if v is not None]
+        if finite != sorted(finite) or len(finite)!=len(set(finite)):
+            return False,"Các mốc hữu hạn phải tăng nghiêm ngặt."
+        domain=sp.calculus.util.continuous_domain(expr,x,sp.S.Reals)
+        # Every supplied open interval must lie inside the domain and contain no
+        # omitted real root of f'. This prevents a single lucky sample point from passing.
+        try:
+            critical_set=sp.solveset(sp.Eq(deriv,0),x,domain=domain)
+        except Exception:
+            critical_set=sp.S.EmptySet
         for i,want in enumerate(signs):
             left,right=numeric[i],numeric[i+1]
             sample=(left+right)/2 if left is not None and right is not None else (right-1 if right is not None else left+1 if left is not None else 0)
+            interval=sp.Interval.open(-sp.oo if left is None else left,sp.oo if right is None else right)
+            if not interval.is_subset(domain): return False,f"Khoảng thứ {i+1} không nằm hoàn toàn trong tập xác định."
+            internal=sp.Intersection(critical_set,interval)
+            if internal is not sp.S.EmptySet and internal != sp.S.EmptySet:
+                try:
+                    if len(internal)>0: return False,f"Thiếu điểm tới hạn trong khoảng thứ {i+1}: {internal}."
+                except TypeError:
+                    return False,f"Không chứng minh được đạo hàm giữ nguyên dấu trên khoảng thứ {i+1}."
             got=float(sp.N(deriv.subs(x,sample)))
+            if not math.isfinite(got): return False,f"Không tính được dấu đạo hàm trên khoảng thứ {i+1}."
             expected=str(want).strip().replace("−","-")
             if expected=="+" and got<=1e-8: return False,f"Dấu đạo hàm sai trên khoảng thứ {i+1}."
             if expected=="-" and got>=-1e-8: return False,f"Dấu đạo hàm sai trên khoảng thứ {i+1}."
         for i,(point,want) in enumerate(zip(numeric,values),1):
-            if point is None or want in (None,""): continue
-            actual=sp.N(expr.subs(x,point))
-            if actual in (sp.zoo,sp.oo,-sp.oo) or getattr(actual,"is_finite",None) is False: continue
+            if want in (None,""): continue
             wanted=str(want).strip().replace("−","-").replace("∞","oo")
+            if point is None:
+                direction=-sp.oo if i==1 else sp.oo
+                actual=sp.limit(expr,x,direction)
+            elif sp.Contains(point,domain) is sp.S.false:
+                # At a discontinuity the compact schema cannot encode two one-sided limits.
+                return False,f"Mốc thứ {i} không thuộc tập xác định; cần bảng có giới hạn trái/phải."
+            else:
+                actual=sp.N(expr.subs(x,point))
             try:
-                expected_value=float(sp.N(sp.sympify(wanted)))
-                if not math.isclose(float(actual),expected_value,rel_tol=1e-7,abs_tol=1e-7):
-                    return False,f"Giá trị hàm số sai tại mốc thứ {i}."
-            except (TypeError,ValueError,sp.SympifyError):
+                expected_value=parse_numeric(wanted)
+                if sp.simplify(actual-expected_value)!=0:
+                    if not (actual.is_number and expected_value.is_number and math.isclose(float(actual),float(expected_value),rel_tol=1e-7,abs_tol=1e-7)):
+                        return False,f"Giá trị hoặc giới hạn sai tại mốc thứ {i}."
+            except (TypeError,ValueError,SafeMathError,OverflowError):
                 return False,f"Không đọc được giá trị tại mốc thứ {i}."
-        return True,"Đã kiểm chứng dấu đạo hàm và giá trị hàm số từ expression."
+        return True,"Đã kiểm chứng tập xác định, điểm tới hạn, dấu đạo hàm và giá trị/giới hạn."
     except Exception as exc: return False,f"Không kiểm chứng được bảng biến thiên: {exc}"
 
 

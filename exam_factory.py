@@ -69,12 +69,12 @@ PEDAGOGY REPORT: {json.dumps(pedagogy_report, ensure_ascii=False)}"""
 
 def certificate(report: dict) -> dict:
     status = str(report.get("status", "MANUAL_REVIEW")).upper()
-    certificate_status = {"PASS": "CERTIFIED", "FAIL": "REJECTED"}.get(status, "CONDITIONAL")
+    certificate_status = {"PASS": "AUTO_QA_PASSED", "FAIL": "REJECTED"}.get(status, "TEACHER_REVIEW_REQUIRED")
     payload = json.dumps(report, ensure_ascii=False, sort_keys=True, default=str)
     return {
-        "version": "5.0.0",
+        "version": "5.1.0-p0",
         "certificate_status": certificate_status,
-        "scope": "Kiểm tra tự động trong phạm vi các engine; giáo viên vẫn chịu trách nhiệm duyệt cuối.",
+        "scope": "AUTO_QA_PASSED chỉ xác nhận không phát hiện lỗi trong phạm vi engine; không phải chứng nhận chuyên môn. Giáo viên phải duyệt cuối.",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "report_fingerprint": hashlib.sha256(payload.encode("utf-8")).hexdigest().upper(),
     }

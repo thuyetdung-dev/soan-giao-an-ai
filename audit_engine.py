@@ -5,6 +5,7 @@ from difflib import SequenceMatcher
 try:
  import sympy as sp
 except Exception: sp=None
+from safe_math_parser import parse_math_expression
 
 def norm(s): return re.sub(r'[^0-9a-zà-ỹ]+','',str(s or '').lower())
 def mexpr(s):
@@ -12,7 +13,7 @@ def mexpr(s):
  return s.replace('ln(','log(')
 def sx(s):
  if sp is None: raise RuntimeError('SymPy chưa cài')
- return sp.sympify(mexpr(s),locals={'x':sp.Symbol('x'),'pi':sp.pi,'E':sp.E,'sin':sp.sin,'cos':sp.cos,'tan':sp.tan,'sqrt':sp.sqrt,'log':sp.log,'exp':sp.exp,'abs':sp.Abs})
+ return parse_math_expression(mexpr(s), {'x':sp.Symbol('x', real=True)})
 def equal(a,b):
  try:return bool(sp.simplify(sx(a)-sx(b))==0)
  except:return None

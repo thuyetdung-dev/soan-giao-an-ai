@@ -31,7 +31,7 @@ from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "7.1.0 Stable (Math Safety Gate + Exam Intelligence V5)"
+APP_VERSION = "7.2.0 P0 Safety Release"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -765,7 +765,7 @@ if mode == "🧬 Exam Intelligence V5.0":
         exam=st.session_state.get("v5_exam"); mr=st.session_state.get("v5_mr"); pr=st.session_state.get("v5_pr"); variants=st.session_state.get("v5_variants",[]); mf=st.session_state.get("v5_manifest",{})
         if exam:
             gate=mf.get("release_gate","CONDITIONAL"); a,b,c,d=st.columns(4); a.metric("Câu",len(exam.get("questions",[]))); b.metric("Gate",gate); c.metric("Mã đề",len(variants)); d.metric("DNA unique",coverage_report(exam).get("unique",0))
-            if gate=="CERTIFIED": st.success("🟢 CERTIFIED — đề vượt Release Gate V5.0 trong phạm vi các bộ máy tự động.")
+            if gate=="AUTO_QA_PASSED": st.success("🟢 AUTO QA PASSED — chưa phát hiện lỗi trong phạm vi kiểm tra tự động; giáo viên vẫn phải duyệt chuyên môn.")
             elif gate=="REJECTED": st.error("🔴 REJECTED — cần sửa lỗi trước khi phát hành.")
             else: st.warning("🟡 CONDITIONAL — cần giáo viên duyệt các điểm REVIEW.")
             st.download_button("📥 Tải manifest V5.0",json.dumps(mf,ensure_ascii=False,indent=2),"manifest_v5.json","application/json",use_container_width=True)
@@ -831,14 +831,14 @@ if mode == "🏭 AI Exam Factory V5.0":
             except Exception as e: st.error(f"V5.0 gặp lỗi: {e}")
     exam=st.session_state.get("v4_exam"); rep=st.session_state.get("v4_report")
     if exam and rep:
-        c1,c2,c3=st.columns(3); c1.metric("QA Score",rep["summary"]["score"]); c2.metric("Trạng thái",rep["status"]); c3.metric("Chứng nhận",rep["certificate"]["certificate_status"])
-        if rep["status"]=="PASS": st.success("🟢 ĐẠT KIỂM TRA TỰ ĐỘNG V5.0 — vẫn cần giáo viên duyệt cuối.")
+        c1,c2,c3=st.columns(3); c1.metric("QA Score",rep["summary"]["score"]); c2.metric("Trạng thái",rep["status"]); c3.metric("QA tự động",rep["certificate"]["certificate_status"])
+        if rep["status"]=="PASS": st.success("🟢 AUTO QA PASSED — chưa phát hiện lỗi tự động; vẫn cần giáo viên duyệt chuyên môn trước khi sử dụng.")
         elif rep["status"]=="FAIL": st.error("🔴 REJECTED — còn lỗi FAIL, không nên phát hành.")
         else: st.warning("🟡 CONDITIONAL — cần giáo viên duyệt các điểm REVIEW.")
         for c in rep["council"]:
             with st.expander(f"{c.get('role','Reviewer')} — {c.get('status','REVIEW')} — {c.get('score',0)}"):
                 st.json(c)
-        with st.expander("🔐 Chứng nhận & dấu vết phiên bản"): st.json(rep["certificate"])
+        with st.expander("🔐 Kết quả QA tự động & dấu vết phiên bản"): st.json(rep["certificate"])
         st.download_button("📥 JSON báo cáo V5.0",json.dumps({"exam":exam,"report":rep},ensure_ascii=False,indent=2),"bao_cao_V5_0.json","application/json",use_container_width=True)
         st.download_button("📝 Xuất Word đề",build_exam_docx(exam,rep["certificate"]),"de_toan_V5_0.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",use_container_width=True)
         st.download_button("📊 Xuất PowerPoint đề",build_exam_pptx(exam,theme_name,False),"de_toan_V5_0.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
@@ -959,7 +959,7 @@ if lesson_data and config and report:
     d.metric("Kiểu bố cục",len(report["summary"]["layouts"]))
     if report["status"]=="FAIL": st.error("Bài giảng thiếu thành phần bắt buộc; cần duyệt và sửa trước khi dùng.")
     elif report["status"]=="REVIEW": st.warning("Bài giảng đã tạo nhưng còn điểm cần giáo viên duyệt.")
-    else: st.success("Không phát hiện lỗi trong phạm vi kiểm định tự động.")
+    else: st.success("ĐẠT KIỂM TRA KỸ THUẬT TỰ ĐỘNG — giáo viên vẫn phải duyệt nội dung Toán học và sư phạm.")
     if report["issues"]: st.dataframe(report["issues"],use_container_width=True)
     preview=[{"STT":i,"Hoạt động":s["activity"],"Layout":s["layout"],"Tiêu đề":s["title"],"Nhiệm vụ":s.get("question","")[:90],"Sản phẩm":s.get("product","")[:70]} for i,s in enumerate(lesson_data["slides"],1)]
     st.dataframe(preview,use_container_width=True,height=360)
