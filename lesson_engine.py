@@ -161,6 +161,7 @@ def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
             "graph": raw.get("graph") if isinstance(raw.get("graph"), dict) else None,
             "variation_table": raw.get("variation_table") if isinstance(raw.get("variation_table"), dict) else None,
             "image_asset": raw.get("image_asset") if isinstance(raw.get("image_asset"), dict) else None,
+            "visuals": [v for v in raw.get("visuals",[]) if isinstance(v,dict)][:4] if isinstance(raw.get("visuals"),list) else [],
             "visual_requirement": infer_visual_requirement(raw),
         })
     if not slides:

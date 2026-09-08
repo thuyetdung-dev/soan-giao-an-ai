@@ -1,0 +1,18 @@
+LESSONSTUDIO V9.0 — TEST REPORT
+
+Ngày kiểm tra: 2026-09-08
+- Toàn bộ tệp Python: py_compile PASSED.
+- 5/5 kiểm thử MathViz V9: PASSED.
+- JSON mẫu gemini-code-de.json: nhập đủ 22/22 câu.
+- Visual nhận từ JSON: đồ thị ở câu 4, bảng biến thiên ở câu 6.
+- Visual phục hồi xác định: hình triển khai 16 x 10 ở câu 22.
+- Cảnh báo còn lại trên JSON mẫu: 0.
+
+Phạm vi kiểm thử tự động mới:
+1. Tách data-mathviz khỏi chuỗi câu hỏi.
+2. Từ chối bảng biến thiên sai số lượng trường.
+3. Chuyển mcq/tf/sa thành slide bài giảng.
+4. Nhận diện câu tham chiếu hình còn thiếu visual.
+5. Render bảng biến thiên và hình triển khai thành PNG.
+
+Các kiểm thử cũ cần môi trường đã cài đầy đủ requirements.txt để chạy toàn bộ.

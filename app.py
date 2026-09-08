@@ -32,6 +32,7 @@ from visual_engine import paginate_lesson
 from visual_recovery_engine import recover_lesson_visuals, recover_slide_visual, attach_teacher_asset, pending_visuals, approve_recovered_visuals
 from source_asset_extractor import extract_docx_assets
 from html_studio import render_html_studio
+from mathviz_engine import question_bank_to_lesson, render_visual
 from curriculum_engine import audit_curriculum, repair_quality_key, structural_defects
 from ai_resilience import AIQuotaUnavailable, generate_with_fallback
 from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan, validate_source_batch
@@ -39,7 +40,7 @@ from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.5.0 MathViz HTML Studio"
+APP_VERSION = "9.0.0 Visual Specification PowerPoint"
 MAX_UPLOAD_MB = 20
 MAX_TOTAL_UPLOAD_MB = 50
 MAX_SOURCE_FILES = 8
@@ -247,7 +248,17 @@ def create_graph(graph: dict[str, Any]) -> io.BytesIO | None:
     ax.axvline(0, color="#263238", linewidth=1)
     ax.grid(True, linestyle="--", alpha=0.28)
     ax.set_xlim(x_min, x_max)
-    ax.set_ylim(lower, upper)
+    requested_ymin,requested_ymax=graph.get("y_min"),graph.get("y_max")
+    if requested_ymin is not None and requested_ymax is not None and float(requested_ymin)<float(requested_ymax):
+        ax.set_ylim(float(requested_ymin),float(requested_ymax))
+    else: ax.set_ylim(lower, upper)
+    if graph.get("xticks"): ax.set_xticks([float(v) for v in graph["xticks"][:20]])
+    if graph.get("yticks"): ax.set_yticks([float(v) for v in graph["yticks"][:20]])
+    for point in graph.get("points",[])[:20]:
+        try:
+            px,py=float(point["x"]),float(point["y"]); ax.scatter([px],[py],s=34,color="#d1495b",zorder=5)
+            if point.get("label"): ax.annotate(clean_text(point["label"]),(px,py),xytext=(5,7),textcoords="offset points",fontsize=10)
+        except Exception: pass
     ax.set_xlabel("x")
     ax.set_ylabel("y", rotation=0, labelpad=10)
     ax.set_title(clean_text(graph.get("caption") or f"Đồ thị y = {expression}"), fontsize=13, weight="bold")
@@ -348,6 +359,11 @@ NGUYÊN TẮC NỘI DUNG:
 - Nếu đủ biểu thức để tái tạo, bắt buộc dùng graph hoặc variation_table có expression kiểm chứng được.
 - graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
 - variation_table: {{"expression":"x**3-3*x", "points":["-∞","-1","1","+∞"], "interval_signs":["+","-","+"], "values":["-∞","2","-2","+∞"]}}. Trường expression là bắt buộc và phải là biểu thức Python/SymPy tương ứng đúng với hàm số để hệ thống tự kiểm chứng bảng.
+- Với visual lấy từ ngân hàng câu hỏi, ưu tiên trường visuals tách khỏi văn bản; không tự viết SVG/JavaScript.
+- Đồ thị MathViz: {{"type":"dothi","fn":"x^3-3x^2+2","xmin":-2,"xmax":4,"ymin":-3,"ymax":3,"points":[{{"x":0,"y":2}},{{"x":2,"y":-2}}]}}.
+- Bảng biến thiên MathViz: {{"type":"bbt","nodes":["-oo","1","3","+oo"],"marks":["","0","0",""],"signs":["+","-","+"],"vals":[{{"t":"-oo","p":"b"}},{{"t":"2","p":"t"}},{{"t":"-2","p":"b"}},{{"t":"+oo","p":"t"}}]}}.
+- Hình triển khai hộp không nắp: {{"type":"net","shape":"open_box","width":16,"height":10,"cut":"x","showCutLines":true}}.
+- Nếu không đủ dữ kiện để dựng chính xác, để visuals=[] và khai báo visual_requirement.required=true để Teacher Asset Hub yêu cầu giáo viên cung cấp ảnh. Tuyệt đối không bịa hình.
 
 Trả về duy nhất JSON chuẩn:
 {{
@@ -387,7 +403,8 @@ Trả về duy nhất JSON chuẩn:
     "graph":null,
     "variation_table":null
 	,"image_asset":null,
-	"visual_requirement":{{"required":false,"type":"function_graph|variation_table|source_image","reason":""}}
+	"visuals":[{{"type":"dothi|bbt|xetdau|net","placement":"below_question","payload":{{}}}}],
+	"visual_requirement":{{"required":false,"type":"function_graph|variation_table|geometry|source_image","reason":""}}
   }}]
 }}
 """
@@ -706,6 +723,12 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
                     visual = create_graph(slide_data["graph"])
                 except (ValueError, SyntaxError, TypeError):
                     visual = None
+            if visual is None and chunk_index == 0 and slide_data.get("visuals"):
+                try:
+                    visual_spec=slide_data["visuals"][0]
+                    visual=render_visual(visual_spec.get("payload",visual_spec),create_graph)
+                except Exception:
+                    visual=None
             variation_ok,_variation_detail=verify_variation_table(slide_data.get("variation_table")) if slide_data.get("variation_table") else (False,"")
             native_variation = chunk_index == 0 and variation_ok
 
@@ -738,12 +761,10 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
                 add_text(slide,side_text,8.68,2.08,3.5,2.25,20,theme["primary"],True,PP_ALIGN.CENTER,valign=MSO_ANCHOR.MIDDLE)
                 add_formula_block(slide,formulas,8.62,4.35,3.63,theme)
             elif visual:
-                # ÉP CHIỀU RỘNG CHỮ TỐI ĐA LÀ 7.0 INCH (~1/2 trang theo chiều ngang)
-                # Chữ chạy tới mốc này sẽ TỰ ĐỘNG rớt dòng, hoàn toàn không che lấp Hình bên phải.
-                add_bullets(slide, chunk, .75, 1.72, 7.0, 3.0, 22)
-                
-                # Cố định hình vẽ/bảng biến thiên ở góc trên bên phải
-                slide.shapes.add_picture(visual, Inches(8.2), Inches(1.08), width=Inches(4.8))
+                # Hai vùng độc lập: chữ không bao giờ đi vào vùng hình.
+                add_bullets(slide, chunk, .82, 1.68, 5.65, 2.78, 19)
+                add_panel(slide,6.72,1.62,5.8,2.95,(255,255,255),(215,221,226))
+                slide.shapes.add_picture(visual, Inches(6.92), Inches(1.8), width=Inches(5.4), height=Inches(2.58))
             else:
                 size = 23 if sum(map(len, chunk)) < 280 else 21
                 body_bottom=3.62 if formulas else 4.62 if slide_data.get("question") or slide_data.get("product") else 6.55
@@ -1100,13 +1121,20 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. LessonStudio V8.5 — MathViz HTML Studio")
-st.caption("Math Visual First: visual bắt buộc → tạo từng chặng → chống lặp → kiểm định mật độ → xuất PowerPoint.")
-checkpoint_upload=st.file_uploader("Khôi phục từ checkpoint JSON V8.2/V8.3/V8.4/V8.5",type=["json"],key="checkpoint_v84")
-if checkpoint_upload and st.button("♻️ KHÔI PHỤC CHECKPOINT",use_container_width=True):
+st.subheader("2. LessonStudio V9.0 — Visual Specification PowerPoint")
+st.caption("Nhận JSON bài giảng hoặc JSON ngân hàng câu hỏi → tách MathViz → kiểm định visual → xuất PowerPoint chống tràn.")
+checkpoint_upload=st.file_uploader("Tải JSON bài giảng hoặc JSON ngân hàng câu hỏi mcq/tf/sa",type=["json"],key="checkpoint_v84")
+if checkpoint_upload and st.button("♻️ NHẬP JSON VÀ DỰNG BÀI GIẢNG",use_container_width=True):
     try:
-        restored=validate_lesson(json.loads(checkpoint_upload.getvalue().decode("utf-8-sig")))
-        config=LessonConfig(teacher,school,grade,book,lesson,int(periods),student_level,int(slide_count),theme_name,include_answers,include_notes)
+        raw_json=json.loads(checkpoint_upload.getvalue().decode("utf-8-sig"))
+        import_warnings=[]
+        if isinstance(raw_json,dict) and any(k in raw_json for k in ("mcq","tf","sa")):
+            converted,import_warnings=question_bank_to_lesson(raw_json,lesson or "Bài giảng từ ngân hàng câu hỏi")
+            restored=validate_lesson(converted)
+        else:
+            restored=validate_lesson(raw_json)
+        actual_count=len(restored.get("slides",[]))
+        config=LessonConfig(teacher,school,grade,book,lesson,int(periods),student_level,actual_count,theme_name,include_answers,include_notes)
         source_text,source_parts,source_manifest=read_sources(uploaded)
         st.session_state["lesson_batch_v81"]={"config":config,"source_text":source_text,"source_parts":source_parts,"source_manifest":source_manifest,"lesson":restored}
         if len(restored.get("slides",[]))>=config.slide_count:
@@ -1115,10 +1143,16 @@ if checkpoint_upload and st.button("♻️ KHÔI PHỤC CHECKPOINT",use_containe
             st.session_state["lesson_report_v6"]=audit_lesson(restored,config.slide_count,source_text)
             st.session_state["curriculum_report_v8"]=audit_curriculum(restored.get("lesson_profile",{}),restored.get("storyboard",[]),config.periods,len(restored.get("slides",[])))
             st.session_state["storyboard_approved_v8"]=False
-        st.success(f"Đã khôi phục {len(restored.get('slides',[]))} slide; cần duyệt lại trước khi xuất.")
+        st.session_state["json_import_warnings_v9"]=import_warnings
+        st.success(f"Đã nhập {actual_count} slide; cần duyệt visual và nội dung trước khi xuất.")
         st.rerun()
     except Exception as exc:
-        st.error(f"Không thể khôi phục checkpoint: {exc}")
+        st.error(f"Không thể nhập JSON: {exc}")
+import_warnings=st.session_state.get("json_import_warnings_v9",[])
+if import_warnings:
+    st.warning(f"Phát hiện {len(import_warnings)} điểm cần bổ sung visual.")
+    with st.expander("Chi tiết cảnh báo nhập JSON",expanded=True):
+        for warning in import_warnings: st.write("• "+warning)
 batch_state=st.session_state.get("lesson_batch_v81")
 if batch_state:
     completed=len(batch_state["lesson"].get("slides",[])); target=batch_state["config"].slide_count
@@ -1301,7 +1335,7 @@ if lesson_data and config and report:
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
         filename=f"{safe_name[:70]}_LessonStudioV8_4_VisualRecovery.pptx"
         export_locked=combined_fail or not st.session_state.get("storyboard_approved_v8",False)
-        st.download_button("📥 TẢI POWERPOINT LESSONSTUDIO V8.5",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
+        st.download_button("📥 TẢI POWERPOINT LESSONSTUDIO V9.0",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
         if combined_fail: st.error("Đã khóa xuất vì còn lỗi nghiêm trọng trong bài giảng hoặc storyboard.")
         elif not st.session_state.get("storyboard_approved_v8",False): st.warning("Hãy duyệt Hồ sơ bài học và Storyboard để mở khóa PowerPoint.")
         qa_payload={"lesson_qa":report,"curriculum_qa":curriculum_report}

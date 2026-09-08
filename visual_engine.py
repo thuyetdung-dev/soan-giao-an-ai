@@ -12,6 +12,7 @@ VISUAL_PATTERNS = {
     "function_graph": (
         r"đồ\s+thị", r"quan\s+sát\s+hình", r"từ\s+hình\s+vẽ", r"hình\s*\d+(?:\.\d+)?",
     ),
+    "geometry": (r"như\s+hình", r"hình\s+bên", r"hình\s+dưới", r"theo\s+hình\s+vẽ", r"tấm\s+bìa.*cắt"),
 }
 
 
@@ -35,6 +36,10 @@ def infer_visual_requirement(slide: dict) -> dict:
         requested.append("variation_table")
     if slide.get("graph") and "function_graph" not in requested:
         requested.append("function_graph")
+    for visual in slide.get("visuals",[]) or []:
+        kind=str(visual.get("type", ""))
+        mapped="function_graph" if kind=="dothi" else "variation_table" if kind in {"bbt","xetdau"} else "geometry"
+        if mapped not in requested: requested.append(mapped)
     required = bool(requested) or slide.get("layout") == "visual"
     return {
         "required": required,
@@ -50,6 +55,9 @@ def visual_assets(slide: dict) -> set[str]:
     if isinstance(slide.get("image_asset"), dict): assets.add("source_image")
     if isinstance(slide.get("geometry"), dict): assets.add("geometry")
     if isinstance(slide.get("chart"), dict): assets.add("chart")
+    for visual in slide.get("visuals",[]) or []:
+        kind=str(visual.get("type", ""))
+        assets.add("function_graph" if kind=="dothi" else "variation_table" if kind in {"bbt","xetdau"} else "geometry")
     return assets
 
 
@@ -67,6 +75,9 @@ def audit_visual_contract(slide: dict, number: int) -> list[dict]:
         if kind == "function_graph" and not ({"function_graph","source_image"} & assets):
             issues.append({"severity":"FAIL", "code":"MISSING_GRAPH_OR_IMAGE",
                            "message":f"Slide {number} yêu cầu đọc hình hoặc đồ thị nhưng chưa có graph/image_asset."})
+        if kind == "geometry" and not ({"geometry","source_image"} & assets):
+            issues.append({"severity":"FAIL", "code":"MISSING_GEOMETRY_OR_IMAGE",
+                           "message":f"Slide {number} tham chiếu hình nhưng chưa có visual hình học hoặc ảnh nguồn."})
     for key in ("graph","variation_table"):
         asset=slide.get(key)
         if isinstance(asset,dict) and asset.get("recovery_status")=="AUTO_GENERATED" and not asset.get("teacher_approved"):
@@ -80,7 +91,7 @@ def density_budget(slide: dict) -> dict:
     bullets = [str(x) for x in (slide.get("bullets") or [])]
     chars = sum(len(x) for x in bullets) + len(str(slide.get("question") or ""))
     chars += len(str(slide.get("product") or "")) + len(str(slide.get("answer") or ""))
-    blocks = sum(bool(slide.get(k)) for k in ("question","product","answer","graph","variation_table","image_asset"))
+    blocks = sum(bool(slide.get(k)) for k in ("question","product","answer","graph","variation_table","image_asset","visuals"))
     limit = 310 if visual_assets(slide) else 430
     return {"chars":chars, "blocks":blocks, "limit":limit,
             "overflow_risk":chars > limit or len(bullets) > 5 or blocks > 3}
@@ -102,6 +113,7 @@ def split_overloaded_slide(slide: dict) -> list[dict]:
     second["graph"] = None
     second["variation_table"] = None
     second["image_asset"] = None
+    second["visuals"] = []
     if not second["bullets"] and not any(second.get(k) for k in ("question","product","answer","formulas")):
         return [slide]
     return [first, second]
