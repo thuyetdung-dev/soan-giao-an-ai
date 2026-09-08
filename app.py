@@ -38,7 +38,7 @@ from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.4.0 Visual Recovery & Teacher Asset Hub"
+APP_VERSION = "8.4.1 Visual Recovery & Teacher Asset Hub"
 MAX_UPLOAD_MB = 20
 MAX_TOTAL_UPLOAD_MB = 50
 MAX_SOURCE_FILES = 8
@@ -386,7 +386,7 @@ Trả về duy nhất JSON chuẩn:
     "graph":null,
     "variation_table":null
 	,"image_asset":null,
-	"visual_requirement":{"required":false,"type":"function_graph|variation_table|source_image","reason":""}
+	"visual_requirement":{{"required":false,"type":"function_graph|variation_table|source_image","reason":""}}
   }}]
 }}
 """

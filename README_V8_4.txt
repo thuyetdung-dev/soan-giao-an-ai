@@ -1,5 +1,9 @@
 LESSONSTUDIO V8.4 — VISUAL RECOVERY & TEACHER ASSET HUB
 
+BẢN VÁ 8.4.1
+- Sửa ngoặc JSON visual_requirement trong f-string của build_prompt.
+- Bổ sung kiểm thử hồi quy bảo đảm prompt được tạo thành công và JSON mẫu giữ đúng ngoặc.
+
 TÍNH NĂNG MỚI
 1. Tự nhận diện biểu thức f(x)=... hoặc y=... trong slide thiếu visual.
 2. Tự tạo cấu hình đồ thị khi biểu thức qua Safe Math Parser.

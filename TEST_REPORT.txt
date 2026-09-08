@@ -1,7 +1,9 @@
-LESSONSTUDIO V8.4 — TEST REPORT
+LESSONSTUDIO V8.4.1 — TEST REPORT
 
 Ngày kiểm tra: 2026-09-08
-Kết quả: 35/35 PASSED
+Kết quả: 36/36 PASSED
+
+Bản vá 8.4.1 bổ sung kiểm thử hồi quy build_prompt để ngăn lỗi Invalid format specifier.
 
 Bổ sung 6 kiểm thử Visual Recovery & Teacher Asset Hub:
 - Chỉ nhận diện biểu thức hàm được viết rõ ràng.
