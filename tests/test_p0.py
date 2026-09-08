@@ -2,6 +2,7 @@ import unittest
 
 import sympy as sp
 
+from ai_resilience import AIQuotaUnavailable, classify_ai_error, generate_with_fallback, order_models
 from adaptive_engine import variant_consistency
 from curriculum_engine import audit_curriculum, normalize_profile, normalize_storyboard
 from lesson_engine import audit_lesson, safe_autofix_lesson, verify_variation_table
@@ -91,6 +92,25 @@ class CurriculumV8Tests(unittest.TestCase):
         self.story[-1]["slide_refs"]=[6]
         self.assertEqual(audit_curriculum(self.profile,self.story,1,5)["status"],"FAIL")
 
+
+class AIResilienceTests(unittest.TestCase):
+    def test_classifies_quota_error(self):
+        self.assertEqual(classify_ai_error(RuntimeError("429 quota exceeded")),"QUOTA")
+
+    def test_falls_back_after_daily_quota(self):
+        class FakeModel:
+            def __init__(self,name): self.name=name
+            def generate_content(self,_contents):
+                if self.name=="models/gemini-primary": raise RuntimeError("429 GenerateRequestsPerDayPerProjectPerModel")
+                return type("Response",(),{"text":"{}"})()
+        response,meta=generate_with_fallback("models/gemini-primary",["models/gemini-primary","models/gemini-flash-lite"],"x",FakeModel,sleep_fn=lambda _:None)
+        self.assertEqual(response.text,"{}")
+        self.assertEqual(meta["used_model"],"models/gemini-flash-lite")
+        self.assertTrue(meta["fallback_used"])
+
+    def test_keeps_selected_model_first(self):
+        ordered=order_models("models/gemini-selected",["models/gemini-flash-lite","models/gemini-selected"])
+        self.assertEqual(ordered[0],"models/gemini-selected")
 
 if __name__ == "__main__":
     unittest.main()

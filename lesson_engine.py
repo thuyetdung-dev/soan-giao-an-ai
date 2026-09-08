@@ -164,7 +164,7 @@ def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
         raise ValueError("Các slide AI tạo ra không hợp lệ.")
     objectives = data.get("objectives", [])
     if not isinstance(objectives, list): objectives = [objectives]
-    return {"title": _text(data.get("title") or "Bài giảng Toán", 200), "objectives": [_clean_inline_math(_text(x, 400)) for x in objectives[:8] if _text(x)], "lesson_profile":normalize_profile(data.get("lesson_profile")), "storyboard":normalize_storyboard(data.get("storyboard")), "slides": slides, "_safety_repairs": list(data.get("_safety_repairs",[])) if isinstance(data.get("_safety_repairs",[]),list) else []}
+    return {"title": _text(data.get("title") or "Bài giảng Toán", 200), "objectives": [_clean_inline_math(_text(x, 400)) for x in objectives[:8] if _text(x)], "lesson_profile":normalize_profile(data.get("lesson_profile")), "storyboard":normalize_storyboard(data.get("storyboard")), "slides": slides, "_generation_meta":data.get("_generation_meta",{}) if isinstance(data.get("_generation_meta",{}),dict) else {}, "_safety_repairs": list(data.get("_safety_repairs",[])) if isinstance(data.get("_safety_repairs",[]),list) else []}
 
 
 def safe_autofix_lesson(lesson: dict) -> tuple[dict,list[str]]:

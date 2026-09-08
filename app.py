@@ -28,11 +28,12 @@ from question_bank import QuestionBank, question_dna, fingerprint as question_fi
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
 from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table, safe_autofix_lesson
 from curriculum_engine import audit_curriculum
+from ai_resilience import AIQuotaUnavailable, generate_with_fallback
 from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.0.0 CTGDPT 2018 Profile + Storyboard"
+APP_VERSION = "8.0.1 CTGDPT 2018 + AI Fallback"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -363,15 +364,16 @@ Trả về duy nhất JSON chuẩn:
 }}
 """
 
-def generate_lesson(model_name: str, source_text: str, source_bytes: bytes, source_type: str, config: LessonConfig) -> dict[str, Any]:
+def generate_lesson(model_name: str, available_models: list[str], source_text: str, source_bytes: bytes, source_type: str, config: LessonConfig, notify=None) -> dict[str, Any]:
     prompt = build_prompt(config)
     if source_type == "pdf":
         contents = [{"mime_type": "application/pdf", "data": source_bytes}, prompt]
     else:
         contents = [f"TÀI LIỆU NGUỒN:\n{source_text}\n\n{prompt}"]
     
-    model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json", "temperature": 0.25})
-    response = model.generate_content(contents)
+    def model_factory(name):
+        return genai.GenerativeModel(name, generation_config={"response_mime_type": "application/json", "temperature": 0.25})
+    response,generation_meta=generate_with_fallback(model_name,available_models,contents,model_factory,notify=notify)
     
     if not response.text:
         raise ValueError("AI không trả về nội dung. Vui lòng thử lại.")
@@ -383,8 +385,11 @@ def generate_lesson(model_name: str, source_text: str, source_bytes: bytes, sour
     try:
         match = re.search(r'\{.*\}', raw_json, re.DOTALL)
         if match:
-            return validate_lesson(json.loads(match.group(0), strict=False))
-        return validate_lesson(json.loads(raw_json))
+            result=validate_lesson(json.loads(match.group(0), strict=False))
+        else:
+            result=validate_lesson(json.loads(raw_json))
+        result["_generation_meta"]=generation_meta
+        return result
     except Exception:
         raise ValueError("AI trả về JSON không hợp lệ. Vui lòng tạo lại; hệ thống không tự biến đổi công thức để tránh làm sai nội dung.")
 
@@ -769,6 +774,7 @@ with st.sidebar:
             st.error("Khóa API không có quyền truy cập.")
             selected_model = None
     except Exception:
+        available_models = ["models/gemini-2.5-flash-lite","models/gemini-2.5-flash","models/gemini-2.0-flash","models/gemini-1.5-flash"]
         selected_model = "models/gemini-1.5-flash"
 
 st.subheader("1. Tải tài liệu nguồn")
@@ -985,7 +991,10 @@ if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_containe
         
         with st.status("Đang soạn bài giảng…", expanded=True) as status:
             st.write("Đang đọc và cấu trúc hóa tài liệu nguồn…")
-            lesson_data = generate_lesson(selected_model, source_text, source_bytes, source_type, config)
+            lesson_data = generate_lesson(selected_model, available_models, source_text, source_bytes, source_type, config, notify=st.write)
+            generation_meta=lesson_data.get("_generation_meta",{})
+            if generation_meta.get("fallback_used"):
+                st.info(f"Đã tự chuyển sang mô hình dự phòng: {generation_meta.get('used_model')}")
             
             st.write("Đang kiểm định tiến trình, mật độ chữ và độ đa dạng bố cục…")
             lesson_report=audit_lesson(lesson_data,int(slide_count),source_text)
@@ -1002,6 +1011,9 @@ if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_containe
         st.error("AI trả về dữ liệu chưa đúng định dạng. Vui lòng bấm tạo lại.")
     except ValueError as exc:
         st.error(str(exc))
+    except AIQuotaUnavailable as exc:
+        st.error(str(exc))
+        st.info("Không cần tải lại tài liệu. Hãy giữ nguyên trang và thử lại sau, hoặc thay GEMINI_API_KEY trong Secrets.")
     except Exception as e:
         st.error(f"Lỗi: {str(e)}")
 

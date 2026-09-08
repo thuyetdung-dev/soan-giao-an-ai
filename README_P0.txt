@@ -1,6 +1,14 @@
-LESSON STUDIO V8.0 — HỒ SƠ BÀI HỌC & STORYBOARD CTGDPT 2018
+LESSON STUDIO V8.0.1 — HỒ SƠ BÀI HỌC, STORYBOARD & AI FALLBACK
 
-NÂNG CẤP V8.0
+SỬA LỖI HẠN MỨC API Ở V8.0.1
+1. Nhận diện riêng lỗi 429/quota, lỗi máy chủ tạm thời và lỗi API Key/quyền truy cập.
+2. Nếu hạn mức theo ngày của mô hình đang chọn đã hết, tự chuyển sang mô hình Gemini dự phòng đang có trong tài khoản.
+3. Nếu lỗi tạm thời có retry_delay, chỉ chờ và thử lại một lần theo thời gian Google chỉ định (tối đa 35 giây), tránh vòng lặp vô hạn.
+4. Hiển thị tiến trình chuyển mô hình bằng tiếng Việt và cho biết mô hình thực tế đã tạo bài.
+5. Nếu mọi mô hình đều hết hạn mức, dừng an toàn, giữ nguyên biểu mẫu và tệp đã tải trong phiên làm việc.
+6. Không chia một yêu cầu bị lỗi quota thành nhiều yêu cầu nhỏ vì cách đó làm tiêu tốn thêm số lượt API; bài dài vẫn được sinh trong một lượt rồi kiểm định như V8.0.
+
+NÂNG CẤP NỀN TẢNG V8.0
 1. Sinh Hồ sơ bài học có cấu trúc: vị trí bài, phạm vi nguồn, kiến thức tiền đề, yêu cầu cần đạt, kiến thức cốt lõi, sai lầm thường gặp, nội dung ngoài phạm vi và thiết bị/học liệu.
 2. Mỗi yêu cầu cần đạt gắn với mức độ nhận thức, năng lực toán học, minh chứng học tập và cách đánh giá.
 3. Sinh Storyboard đủ 5 pha: Khởi động, Hình thành kiến thức, Luyện tập, Vận dụng, Củng cố.
