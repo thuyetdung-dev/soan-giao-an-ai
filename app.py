@@ -27,11 +27,12 @@ from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json,
 from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
 from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table, safe_autofix_lesson
+from curriculum_engine import audit_curriculum
 from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "7.2.1 P0.1 Safe Auto-Fix"
+APP_VERSION = "8.0.0 CTGDPT 2018 Profile + Storyboard"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -312,6 +313,10 @@ NGUYÊN TẮC NỘI DUNG:
 - Công thức trong formulas viết bằng LaTeX chuẩn, không đặt dấu $ bao quanh. Hỗ trợ tốt \\frac, \\sqrt, số mũ, chỉ số, chữ Hy Lạp, tổng, tích phân và các quan hệ. Không dùng ký hiệu mơ hồ hoặc kết luận thiếu điều kiện.
 - Dùng ít nhất 6 kiểu layout phù hợp nội dung, không lặp một kiểu quá 4 slide liên tiếp.
 - Chuỗi slide phải theo tiến trình học tập: vấn đề → khám phá → khái quát → luyện tập → vận dụng → tự đánh giá.
+- Trước khi tạo slides, phải lập lesson_profile và storyboard theo CTGDPT 2018.
+- Tổng thời gian storyboard phải bằng đúng {config.periods * 45} phút.
+- Mỗi hoạt động phải mô tả rõ việc học sinh làm, sản phẩm quan sát được, cách đánh giá, câu hỏi gợi mở, khó khăn dự kiến, hỗ trợ và kết luận cần chốt.
+- learning_outcomes phải gắn với một năng lực Toán học phù hợp, minh chứng và cách đánh giá; không gắn đủ mọi năng lực nếu bài học không thực sự kích hoạt.
 
 ĐỒ HỌA TÙY CHỌN:
 - graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
@@ -321,6 +326,25 @@ Trả về duy nhất JSON chuẩn:
 {{
   "title":"Tên bài học",
   "objectives":["Yêu cầu cần đạt 1","Yêu cầu cần đạt 2"],
+  "lesson_profile":{{
+    "lesson_position":"Vị trí bài trong chương và mạch kiến thức",
+    "source_scope":"Phạm vi tài liệu được sử dụng",
+    "prerequisites":["Kiến thức tiền đề"],
+    "learning_outcomes":[{{"outcome":"Kết quả học tập quan sát được","cognitive_level":"nhận biết|thông hiểu|vận dụng","math_competency":"tư duy và lập luận toán học|mô hình hóa toán học|giải quyết vấn đề toán học|giao tiếp toán học|sử dụng công cụ, phương tiện học toán","evidence":"Minh chứng học tập","assessment":"Cách đánh giá"}}],
+    "core_knowledge":["Kiến thức cốt lõi và điều kiện áp dụng"],
+    "common_misconceptions":["Sai lầm thường gặp"],
+    "exclusions":["Nội dung không thuộc phạm vi bài"],
+    "equipment":["Thiết bị/học liệu cần thiết"]
+  }},
+  "storyboard":[{{
+    "phase":"KHỞI ĐỘNG|HÌNH THÀNH KIẾN THỨC|LUYỆN TẬP|VẬN DỤNG|CỦNG CỐ",
+    "title":"Tên hoạt động","minutes":5,"objective":"Mục tiêu hoạt động",
+    "organization":"Cá nhân/cặp đôi/nhóm/cả lớp và trình tự tổ chức",
+    "student_task":"Học sinh thực hiện cụ thể điều gì","product":"Sản phẩm học tập quan sát được",
+    "assessment":"Công cụ hoặc tiêu chí đánh giá","guiding_questions":["Câu hỏi gợi mở"],
+    "anticipated_difficulties":["Khó khăn hoặc sai lầm dự kiến"],"support":["Biện pháp hỗ trợ/phân hóa"],
+    "conclusion":"Kiến thức hoặc thông điệp cần chốt","slide_refs":[1,2]
+  }}],
   "slides":[{{
     "title":"Tiêu đề slide",
     "subtitle":"Thông điệp ngắn nếu cần",
@@ -508,12 +532,43 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
     add_text(cover, info, 1.28, 4.55, 10.5, 1.0, 18, theme["light"])
     add_text(cover, "POWERPOINT BÀI GIẢNG TOÁN THPT", 1.28, 6.65, 10.5, .35, 12, theme["light"], True)
 
+    page = 1
+    profile=lesson.get("lesson_profile",{})
+    if profile:
+        profile_slide=prs.slides.add_slide(blank); add_full_background(profile_slide,(255,255,255))
+        add_header(profile_slide,"Hồ sơ bài học — dành cho giáo viên","HỒ SƠ CTGDPT 2018",theme,page)
+        profile_lines=[]
+        if profile.get("lesson_position"): profile_lines.append("Vị trí bài học: "+profile["lesson_position"])
+        if profile.get("source_scope"): profile_lines.append("Phạm vi: "+profile["source_scope"])
+        if profile.get("prerequisites"): profile_lines.append("Tiền đề: "+"; ".join(profile["prerequisites"][:3]))
+        if profile.get("core_knowledge"): profile_lines.append("Kiến thức cốt lõi: "+"; ".join(profile["core_knowledge"][:4]))
+        if profile.get("common_misconceptions"): profile_lines.append("Sai lầm cần dự kiến: "+"; ".join(profile["common_misconceptions"][:3]))
+        add_bullets(profile_slide,profile_lines or ["Hồ sơ bài học đang chờ giáo viên hoàn thiện."],.9,1.65,11.55,4.95,18)
+        profile_slide.notes_slide.notes_text_frame.text="Trang kế hoạch dành cho giáo viên; có thể ẩn khi trình chiếu cho học sinh."
+        page += 1
+
+    storyboard=lesson.get("storyboard",[])
+    for start in range(0,len(storyboard),3):
+        rows=storyboard[start:start+3]
+        story_slide=prs.slides.add_slide(blank); add_full_background(story_slide,(255,255,255))
+        add_header(story_slide,"Storyboard tổ chức dạy học","KẾ HOẠCH GIÁO VIÊN",theme,page)
+        top=1.55
+        for row in rows:
+            add_panel(story_slide,.82,top,11.7,1.55,(248,249,250),theme["accent"])
+            add_text(story_slide,f"{row.get('phase','')} • {row.get('minutes',0)} phút — {row.get('title','')}",1.02,top+.1,11.25,.3,15,theme["primary"],True)
+            detail=f"HS: {row.get('student_task','')}\nSản phẩm: {row.get('product','')}  •  Đánh giá: {row.get('assessment','')}"
+            box=add_text(story_slide,detail,1.02,top+.48,11.15,.9,12,(55,65,72))
+            box.text_frame.auto_size=MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            top += 1.72
+        story_slide.notes_slide.notes_text_frame.text="Storyboard CTGDPT 2018 đã được giáo viên duyệt trước khi xuất."
+        page += 1
+
     if lesson.get("objectives"):
         objective_slide=prs.slides.add_slide(blank); add_full_background(objective_slide,(255,255,255))
-        add_header(objective_slide,"Sau bài học, học sinh làm được gì?","KHỞI ĐỘNG",theme,1)
+        add_header(objective_slide,"Sau bài học, học sinh làm được gì?","KHỞI ĐỘNG",theme,page)
         add_bullets(objective_slide,lesson["objectives"],1.05,1.85,11.2,4.7,22)
+        page += 1
 
-    page = 2 if lesson.get("objectives") else 1
     for slide_data in lesson["slides"]:
         chunks = split_bullets(slide_data["bullets"])
         for chunk_index, chunk in enumerate(chunks):
@@ -920,7 +975,7 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Lesson Studio V7.2.1 — Math Premium")
+st.subheader("2. Lesson Studio V8.0 — Hồ sơ bài học & Storyboard CTGDPT 2018")
 st.caption("Tạo cấu trúc → kiểm định → xem trước/chỉnh sửa → xuất PowerPoint.")
 if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_container_width=True, disabled=uploaded is None):
     try:
@@ -934,10 +989,13 @@ if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_containe
             
             st.write("Đang kiểm định tiến trình, mật độ chữ và độ đa dạng bố cục…")
             lesson_report=audit_lesson(lesson_data,int(slide_count),source_text)
+            curriculum_report=audit_curriculum(lesson_data.get("lesson_profile",{}),lesson_data.get("storyboard",[]),int(periods),len(lesson_data.get("slides",[])))
             st.session_state["lesson_data_v6"]=lesson_data
             st.session_state["lesson_config_v6"]=config
             st.session_state["lesson_source_v6"]=source_text
             st.session_state["lesson_report_v6"]=lesson_report
+            st.session_state["curriculum_report_v8"]=curriculum_report
+            st.session_state["storyboard_approved_v8"]=False
             status.update(label="Đã tạo cấu trúc — mời thầy duyệt trước khi xuất", state="complete", expanded=False)
                            
     except json.JSONDecodeError:
@@ -950,6 +1008,7 @@ if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_containe
 lesson_data=st.session_state.get("lesson_data_v6")
 config=st.session_state.get("lesson_config_v6")
 report=st.session_state.get("lesson_report_v6")
+curriculum_report=st.session_state.get("curriculum_report_v8")
 if lesson_data and config and report:
     st.markdown("### 3. Kiểm định và xem trước")
     a,b,c,d=st.columns(4)
@@ -957,16 +1016,38 @@ if lesson_data and config and report:
     b.metric("Điểm QA",report["score"])
     c.metric("Trạng thái",report["status"])
     d.metric("Kiểu bố cục",len(report["summary"]["layouts"]))
-    if report["status"]=="FAIL": st.error("Bài giảng thiếu thành phần bắt buộc; cần duyệt và sửa trước khi dùng.")
+    combined_fail=report["status"]=="FAIL" or not curriculum_report or curriculum_report["status"]=="FAIL"
+    if combined_fail: st.error("Bài giảng hoặc storyboard thiếu thành phần bắt buộc; cần sửa trước khi dùng.")
     elif report["status"]=="REVIEW": st.warning("Bài giảng đã tạo nhưng còn điểm cần giáo viên duyệt.")
     else: st.success("ĐẠT KIỂM TRA KỸ THUẬT TỰ ĐỘNG — giáo viên vẫn phải duyệt nội dung Toán học và sư phạm.")
-    if report["issues"]: st.dataframe(report["issues"],use_container_width=True)
-    if report["status"]=="FAIL":
+    profile_tab,story_tab,qa_tab=st.tabs(["📘 Hồ sơ bài học","🎬 Storyboard CTGDPT 2018","🛡️ Báo cáo QA"])
+    with profile_tab:
+        profile=lesson_data.get("lesson_profile",{})
+        st.write("**Vị trí bài học:**",profile.get("lesson_position", ""))
+        st.write("**Phạm vi nguồn:**",profile.get("source_scope", ""))
+        st.write("**Kiến thức tiền đề:**",profile.get("prerequisites",[]))
+        st.write("**Kiến thức cốt lõi:**",profile.get("core_knowledge",[]))
+        st.write("**Sai lầm thường gặp:**",profile.get("common_misconceptions",[]))
+        st.write("**Nội dung ngoài phạm vi:**",profile.get("exclusions",[]))
+        if profile.get("learning_outcomes"): st.dataframe(profile["learning_outcomes"],use_container_width=True)
+    with story_tab:
+        storyboard=lesson_data.get("storyboard",[])
+        if curriculum_report:
+            x,y,z=st.columns(3); x.metric("Thời gian kế hoạch",f"{curriculum_report['total_minutes']} phút"); y.metric("Thời gian yêu cầu",f"{curriculum_report['target_minutes']} phút"); z.metric("CTGDPT QA",curriculum_report["status"])
+        story_preview=[{"Hoạt động":x["phase"],"Tên":x["title"],"Phút":x["minutes"],"HS thực hiện":x["student_task"],"Sản phẩm":x["product"],"Đánh giá":x["assessment"]} for x in storyboard]
+        st.dataframe(story_preview,use_container_width=True,height=360)
+        st.checkbox("Tôi đã đọc và duyệt Hồ sơ bài học + Storyboard trước khi xuất PowerPoint",key="storyboard_approved_v8",disabled=combined_fail)
+    with qa_tab:
+        if report["issues"]: st.dataframe(report["issues"],use_container_width=True)
+        if curriculum_report and curriculum_report["issues"]: st.dataframe(curriculum_report["issues"],use_container_width=True)
+    if combined_fail:
         if st.button("🛠️ TỰ SỬA AN TOÀN VÀ KIỂM ĐỊNH LẠI",use_container_width=True,type="primary"):
             fixed_lesson,changes=safe_autofix_lesson(lesson_data)
             new_report=audit_lesson(fixed_lesson,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+            new_curriculum=audit_curriculum(fixed_lesson.get("lesson_profile",{}),fixed_lesson.get("storyboard",[]),int(config.periods),len(fixed_lesson.get("slides",[])))
             st.session_state["lesson_data_v6"]=fixed_lesson
             st.session_state["lesson_report_v6"]=new_report
+            st.session_state["curriculum_report_v8"]=new_curriculum
             st.session_state["lesson_safe_changes_v721"]=changes
             st.rerun()
     safe_changes=st.session_state.pop("lesson_safe_changes_v721",None)
@@ -982,15 +1063,21 @@ if lesson_data and config and report:
             try:
                 updated=validate_lesson(json.loads(edited))
                 new_report=audit_lesson(updated,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+                new_curriculum=audit_curriculum(updated.get("lesson_profile",{}),updated.get("storyboard",[]),int(config.periods),len(updated.get("slides",[])))
                 st.session_state["lesson_data_v6"]=updated; st.session_state["lesson_report_v6"]=new_report
+                st.session_state["curriculum_report_v8"]=new_curriculum
+                st.session_state["storyboard_approved_v8"]=False
                 st.rerun()
             except Exception as exc: st.error(f"Không thể áp dụng: {exc}")
     st.markdown("### 4. Xuất PowerPoint")
     try:
         pptx_bytes=build_pptx(lesson_data,config)
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename=f"{safe_name[:70]}_LessonStudioV7_2_1_P0_1_Safe_AutoFix.pptx"
-        st.download_button("📥 TẢI POWERPOINT MATH PREMIUM V7.2.1",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=report["status"]=="FAIL")
-        if report["status"]=="FAIL": st.error("Đã khóa xuất PowerPoint vì còn lỗi nghiêm trọng. Hãy sửa JSON hoặc tạo lại cấu trúc.")
-        st.download_button("📋 TẢI BÁO CÁO KIỂM ĐỊNH",json.dumps(report,ensure_ascii=False,indent=2),f"{safe_name[:70]}_QA.json","application/json",use_container_width=True)
+        filename=f"{safe_name[:70]}_LessonStudioV8_CTGDPT2018.pptx"
+        export_locked=combined_fail or not st.session_state.get("storyboard_approved_v8",False)
+        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.0",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
+        if combined_fail: st.error("Đã khóa xuất vì còn lỗi nghiêm trọng trong bài giảng hoặc storyboard.")
+        elif not st.session_state.get("storyboard_approved_v8",False): st.warning("Hãy duyệt Hồ sơ bài học và Storyboard để mở khóa PowerPoint.")
+        qa_payload={"lesson_qa":report,"curriculum_qa":curriculum_report}
+        st.download_button("📋 TẢI BÁO CÁO KIỂM ĐỊNH",json.dumps(qa_payload,ensure_ascii=False,indent=2),f"{safe_name[:70]}_QA_V8.json","application/json",use_container_width=True)
     except Exception as exc: st.error(f"Không thể dựng PowerPoint: {exc}")

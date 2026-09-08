@@ -1,7 +1,7 @@
-LESSON STUDIO V7.2.1 P0.1 — TEST REPORT
+LESSON STUDIO V8.0 — TEST REPORT
 
-Ngày kiểm tra: 2026-09-07
-Kết quả: 9/9 PASSED
+Ngày kiểm tra: 2026-09-08
+Kết quả: 13/13 PASSED
 
 PASSED — Hai đề khác nhau tạo fingerprint khác nhau.
 PASSED — answer_index và check.correct_index đồng bộ sau khi đảo phương án.
@@ -12,6 +12,10 @@ PASSED — Parser từ chối hàm ngoài danh sách cho phép.
 PASSED — Bảng biến thiên đúng được chấp nhận.
 PASSED — Bảng sai dấu hoặc bỏ sót điểm tới hạn bị từ chối.
 PASSED — Tự sửa an toàn ẩn bảng không kiểm chứng được, giữ nội dung và chuyển trạng thái sang REVIEW.
+PASSED — Hồ sơ và storyboard đầy đủ, đúng 45 phút, qua cổng CTGDPT 2018.
+PASSED — Sai ngân sách thời gian bị chặn.
+PASSED — Yêu cầu cần đạt thiếu minh chứng bị chặn.
+PASSED — Storyboard tham chiếu slide không tồn tại bị chặn.
 
 Lệnh tái kiểm tra:
 python -m unittest discover -s tests -v

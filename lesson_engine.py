@@ -8,6 +8,7 @@ from collections import Counter
 from typing import Any
 from equation_engine import formula_diagnostics
 from safe_math_parser import SafeMathError, parse_math_expression, parse_numeric
+from curriculum_engine import normalize_profile, normalize_storyboard
 try:
     import sympy as sp
 except Exception:
@@ -163,7 +164,7 @@ def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
         raise ValueError("Các slide AI tạo ra không hợp lệ.")
     objectives = data.get("objectives", [])
     if not isinstance(objectives, list): objectives = [objectives]
-    return {"title": _text(data.get("title") or "Bài giảng Toán", 200), "objectives": [_clean_inline_math(_text(x, 400)) for x in objectives[:8] if _text(x)], "slides": slides, "_safety_repairs": list(data.get("_safety_repairs",[])) if isinstance(data.get("_safety_repairs",[]),list) else []}
+    return {"title": _text(data.get("title") or "Bài giảng Toán", 200), "objectives": [_clean_inline_math(_text(x, 400)) for x in objectives[:8] if _text(x)], "lesson_profile":normalize_profile(data.get("lesson_profile")), "storyboard":normalize_storyboard(data.get("storyboard")), "slides": slides, "_safety_repairs": list(data.get("_safety_repairs",[])) if isinstance(data.get("_safety_repairs",[]),list) else []}
 
 
 def safe_autofix_lesson(lesson: dict) -> tuple[dict,list[str]]:

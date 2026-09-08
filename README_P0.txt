@@ -1,4 +1,17 @@
-LESSON STUDIO V7.2.1 P0.1 SAFE AUTO-FIX
+LESSON STUDIO V8.0 — HỒ SƠ BÀI HỌC & STORYBOARD CTGDPT 2018
+
+NÂNG CẤP V8.0
+1. Sinh Hồ sơ bài học có cấu trúc: vị trí bài, phạm vi nguồn, kiến thức tiền đề, yêu cầu cần đạt, kiến thức cốt lõi, sai lầm thường gặp, nội dung ngoài phạm vi và thiết bị/học liệu.
+2. Mỗi yêu cầu cần đạt gắn với mức độ nhận thức, năng lực toán học, minh chứng học tập và cách đánh giá.
+3. Sinh Storyboard đủ 5 pha: Khởi động, Hình thành kiến thức, Luyện tập, Vận dụng, Củng cố.
+4. Mỗi hoạt động có thời lượng, mục tiêu, cách tổ chức, việc học sinh làm, sản phẩm, đánh giá, câu hỏi gợi mở, khó khăn dự kiến, hỗ trợ/phân hóa và kết luận.
+5. Kiểm tra tổng thời gian theo 45 phút/tiết và kiểm tra liên kết hoạt động với slide.
+6. Tách ba khu vực duyệt: Hồ sơ bài học, Storyboard CTGDPT 2018 và báo cáo QA.
+7. Chỉ mở khóa tải PowerPoint sau khi không còn lỗi FAIL và giáo viên xác nhận đã duyệt hồ sơ/storyboard.
+8. PowerPoint có thêm các trang kế hoạch giáo viên cho Hồ sơ bài học và Storyboard; giáo viên có thể ẩn các trang này trước khi trình chiếu cho học sinh.
+9. Báo cáo QA tải về chứa đồng thời kiểm định slide và kiểm định CTGDPT 2018.
+
+NỀN TẢNG AN TOÀN P0/P0.1 ĐƯỢC GIỮ NGUYÊN
 
 Các lỗi P0 đã xử lý:
 1. Chuẩn hóa toàn bộ tên tệp Python để chạy trực tiếp trên GitHub/Streamlit.
@@ -8,7 +21,7 @@ Các lỗi P0 đã xử lý:
 5. Đồng bộ answer_index, check.correct_index và đáp án chữ cái khi đảo phương án.
 6. Bổ sung kiểm thử tự động trong thư mục tests.
 7. Đổi nhãn CERTIFIED thành AUTO_QA_PASSED để không gây hiểu nhầm là đã được chuyên gia duyệt.
-8. Thêm nút TỰ SỬA AN TOÀN VÀ KIỂM ĐỊNH LẠI.
+8. Có nút TỰ SỬA AN TOÀN VÀ KIỂM ĐỊNH LẠI.
 9. Bảng biến thiên không kiểm chứng được sẽ bị ẩn khỏi PowerPoint, có ghi dấu trong Notes và báo REVIEW.
 10. Chuẩn hóa các lệnh LaTeX phổ biến trong textbox thành ký hiệu Unicode dễ đọc.
 
