@@ -1,6 +1,16 @@
-LESSON STUDIO V8.0.2 — TỰ HOÀN THIỆN CẤU TRÚC CTGDPT 2018
+LESSON STUDIO V8.1 — 10-SLIDE BUILDER, CONTINUITY LOCK
 
-NÂNG CẤP V8.0.2
+NÂNG CẤP V8.1
+1. Không còn buộc AI tạo toàn bộ 40–50 slide trong một lượt.
+2. Lần đầu lập bản đồ slide_plan cho toàn bài và chỉ tạo tối đa 10 slide đầu.
+3. Hiển thị nút tiếp nối theo đúng phạm vi: 1–10, 11–20, 21–30, 31–40; chặng cuối tự rút gọn nếu tổng không chia hết cho 10.
+4. Mỗi chặng sau nhận nhật ký tiêu đề, hoạt động, ba ý kiến thức và công thức của toàn bộ slide đã tạo.
+5. Khóa chống lặp trong prompt và kiểm tra độ tương đồng trước khi ghép; chặng bị lặp sẽ không được nhập vào bài.
+6. Ghép theo đúng thứ tự và chỉ chạy QA toàn bài khi đã đủ số slide giáo viên yêu cầu.
+7. Có thanh tiến độ, bảng danh sách slide đã tạo và nút bắt đầu lại rõ ràng.
+8. Hồ sơ bài học và Storyboard toàn bài được lập ở chặng đầu để các chặng sau không làm lệch tiến trình CTGDPT 2018.
+
+NỀN TẢNG V8.0.2
 1. Kiểm định ngay sau lượt sinh đầu để phát hiện thiếu slide và thiếu một trong 5 pha hoạt động.
 2. Nếu lệch quá 2 slide hoặc thiếu pha, chạy tối đa một lượt hoàn thiện cấu trúc có khóa nguồn.
 3. Lượt hoàn thiện phải giữ đúng bài học, không thêm kiến thức mới, đủ 5 pha và đúng tổng thời gian 45 phút/tiết.

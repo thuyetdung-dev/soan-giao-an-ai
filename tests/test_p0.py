@@ -3,6 +3,7 @@ import unittest
 import sympy as sp
 
 from ai_resilience import AIQuotaUnavailable, classify_ai_error, generate_with_fallback, order_models
+from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan
 from adaptive_engine import variant_consistency
 from curriculum_engine import audit_curriculum, normalize_profile, normalize_storyboard, repair_quality_key, structural_defects
 from lesson_engine import audit_lesson, safe_autofix_lesson, verify_variation_table
@@ -128,6 +129,36 @@ class StructuralRepairTests(unittest.TestCase):
         bad=({"summary":{"slides":20},"issues":[{"severity":"FAIL"}]},{"issues":[]})
         good=({"summary":{"slides":18},"issues":[]},{"issues":[]})
         self.assertLess(repair_quality_key(*good,20),repair_quality_key(*bad,20))
+
+
+class ChunkBuilderTests(unittest.TestCase):
+    def test_ranges_cover_requested_total(self):
+        self.assertEqual(batch_range(0,40),(1,10))
+        self.assertEqual(batch_range(10,40),(11,20))
+        self.assertEqual(batch_range(30,37),(31,37))
+
+    def test_digest_contains_previous_knowledge(self):
+        digest=compact_digest([{"title":"Định nghĩa đồng biến","activity":"HÌNH THÀNH KIẾN THỨC","bullets":["f đồng biến trên K","Với mọi x1 nhỏ hơn x2"],"formulas":["f(x_1)<f(x_2)"]}])
+        self.assertEqual(digest[0]["number"],1)
+        self.assertIn("f đồng biến trên K",digest[0]["knowledge"])
+
+    def test_rejects_repeated_slide(self):
+        old=[{"title":"Dấu đạo hàm và tính đơn điệu","bullets":["Nếu f'(x)>0 thì hàm số đồng biến trên khoảng"]}]
+        incoming=[{"title":"Dấu đạo hàm và tính đơn điệu","bullets":["Nếu f'(x)>0 thì hàm số đồng biến trên khoảng"]}]
+        merged,rejected=merge_unique(old,incoming)
+        self.assertEqual(len(merged),1); self.assertTrue(rejected)
+
+    def test_accepts_new_slide(self):
+        old=[{"title":"Định nghĩa đồng biến","bullets":["So sánh f(x1) và f(x2)"]}]
+        incoming=[{"title":"Vận dụng thực tế","bullets":["Phân tích tốc độ tăng trưởng của đại lượng"]}]
+        merged,rejected=merge_unique(old,incoming)
+        self.assertEqual(len(merged),2); self.assertFalse(rejected)
+
+    def test_plan_requires_exact_unique_sequence(self):
+        plan=[{"number":i,"title":f"Slide {i}"} for i in range(1,21)]
+        self.assertTrue(validate_plan(plan,20))
+        plan[-1]["title"]="Slide 1"
+        self.assertFalse(validate_plan(plan,20))
 
 if __name__ == "__main__":
     unittest.main()

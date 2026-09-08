@@ -29,11 +29,12 @@ from v5_engine import build_variants, coverage_report, release_gate, manifest as
 from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table, safe_autofix_lesson
 from curriculum_engine import audit_curriculum, repair_quality_key, structural_defects
 from ai_resilience import AIQuotaUnavailable, generate_with_fallback
+from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan
 from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.0.2 CTGDPT 2018 + Structural Repair"
+APP_VERSION = "8.1.0 CTGDPT 2018 + 10-Slide Builder"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -426,6 +427,47 @@ JSON HIỆN CÓ:
     repaired=validate_lesson(json.loads(match.group(0),strict=False))
     repaired["_generation_meta"]={**lesson.get("_generation_meta",{}),"structural_repair":meta}
     return repaired
+
+
+def generate_lesson_chunk(model_name: str, available_models: list[str], source_text: str, source_bytes: bytes, source_type: str, config: LessonConfig, existing: dict | None=None, notify=None) -> dict[str,Any]:
+    completed=len((existing or {}).get("slides",[])); start,end=batch_range(completed,config.slide_count,10); count=end-start+1
+    if completed==0:
+        prompt=build_prompt(config)+f"""
+QUY TRÌNH THEO CHẶNG V8.1 — ƯU TIÊN CAO HƠN YÊU CẦU SỐ SLIDE PHÍA TRÊN:
+- Lập thêm khóa slide_plan gồm ĐÚNG {config.slide_count} mục, mỗi mục có number, title, activity, knowledge_focus.
+- Trong khóa slides, lần này CHỈ tạo đúng {count} slide đầu, tương ứng số {start} đến {end} của slide_plan.
+- lesson_profile và storyboard vẫn phải lập cho TOÀN BỘ bài {config.periods} tiết.
+"""
+    else:
+        plan=(existing or {}).get("_slide_plan",[]); planned=plan[start-1:end] if plan else []
+        prompt=f"""
+Bạn đang viết tiếp bài giảng Toán THPT theo CTGDPT 2018. Trả về duy nhất JSON dạng {{"slides":[...]}}.
+Hãy tạo ĐÚNG {count} slide số {start} đến {end}; không tạo lại slide cũ.
+KẾ HOẠCH RIÊNG CỦA CHẶNG NÀY: {json.dumps(planned,ensure_ascii=False)}
+NHẬT KÝ KIẾN THỨC ĐÃ TẠO — TUYỆT ĐỐI KHÔNG LẶP LẠI: {json.dumps(compact_digest(existing.get('slides',[])),ensure_ascii=False)}
+Giữ đúng chủ đề: {existing.get('title') or config.lesson}. Chỉ dùng tài liệu nguồn; không bịa kiến thức.
+Mỗi slide có đủ: title, subtitle, activity, layout, bullets, formulas, question, product, answer, teacher_note, source_ref, graph, variation_table.
+Tiếp nối logic từ slide {completed}; mỗi slide đưa bài học tiến thêm một bước. Chỉ nhắc lại tối đa một câu ngắn khi thật sự cần chuyển ý.
+"""
+    contents=[{"mime_type":"application/pdf","data":source_bytes},prompt] if source_type=="pdf" else [f"TÀI LIỆU NGUỒN:\n{source_text}\n\n{prompt}"]
+    def factory(name): return genai.GenerativeModel(name,generation_config={"response_mime_type":"application/json","temperature":0.18})
+    response,meta=generate_with_fallback(model_name,available_models,contents,factory,notify=notify)
+    raw=re.sub(r'```(?:json)?|```','',response.text or '').strip(); match=re.search(r'\{.*\}',raw,re.DOTALL)
+    if not match: raise ValueError("AI không trả về JSON hợp lệ cho chặng slide.")
+    payload=json.loads(match.group(0),strict=False); normalized=validate_lesson(payload)
+    if len(normalized["slides"])!=count: raise ValueError(f"AI trả về {len(normalized['slides'])} slide; chặng này cần đúng {count} slide. Hãy bấm lại chặng này.")
+    if completed==0:
+        plan=payload.get("slide_plan",[])
+        if not validate_plan(plan,config.slide_count):
+            raise ValueError(f"AI lập bản đồ {len(plan) if isinstance(plan,list) else 0} slide; cần đúng {config.slide_count} slide đánh số liên tục, tiêu đề không trùng. Hãy bấm lại chặng đầu.")
+        normalized["_slide_plan"]=plan
+        normalized["_generation_meta"]={"chunks":[meta]}
+        return normalized
+    merged,rejected=merge_unique(existing.get("slides",[]),normalized["slides"])
+    if rejected: raise ValueError("Phát hiện nội dung lặp ở chặng mới: "+", ".join(rejected[:4])+". Hệ thống chưa ghép chặng này; hãy bấm lại.")
+    result=dict(existing); result["slides"]=merged
+    result.setdefault("_generation_meta",{}).setdefault("chunks",[]).append(meta)
+    return result
 
 def add_full_background(slide, color: tuple[int, int, int]) -> None:
     fill = slide.background.fill
@@ -1015,55 +1057,54 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Lesson Studio V8.0.2 — Tự hoàn thiện cấu trúc CTGDPT 2018")
-st.caption("Tạo cấu trúc → kiểm định → xem trước/chỉnh sửa → xuất PowerPoint.")
-if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_container_width=True, disabled=uploaded is None):
-    try:
-        config = LessonConfig(teacher, school, grade, book, lesson, int(periods), student_level,
-                              int(slide_count), theme_name, include_answers, include_notes)
-        source_text, source_bytes, source_type = read_source(uploaded)
-        
-        with st.status("Đang soạn bài giảng…", expanded=True) as status:
-            st.write("Đang đọc và cấu trúc hóa tài liệu nguồn…")
-            lesson_data = generate_lesson(selected_model, available_models, source_text, source_bytes, source_type, config, notify=st.write)
-            generation_meta=lesson_data.get("_generation_meta",{})
-            if generation_meta.get("fallback_used"):
-                st.info(f"Đã tự chuyển sang mô hình dự phòng: {generation_meta.get('used_model')}")
-            
-            st.write("Đang kiểm định tiến trình, mật độ chữ và độ đa dạng bố cục…")
-            lesson_report=audit_lesson(lesson_data,int(slide_count),source_text)
-            curriculum_report=audit_curriculum(lesson_data.get("lesson_profile",{}),lesson_data.get("storyboard",[]),int(periods),len(lesson_data.get("slides",[])))
-            defects=structural_defects(lesson_report,curriculum_report,int(slide_count))
-            if defects:
-                st.write("Phát hiện cấu trúc chưa đủ; đang hoàn thiện riêng số slide và 5 pha hoạt động…")
-                try:
-                    repaired=repair_lesson_structure(selected_model,available_models,lesson_data,defects,source_text,source_bytes,source_type,config,notify=st.write)
-                    repaired_report=audit_lesson(repaired,int(slide_count),source_text)
-                    repaired_curriculum=audit_curriculum(repaired.get("lesson_profile",{}),repaired.get("storyboard",[]),int(periods),len(repaired.get("slides",[])))
-                    if repair_quality_key(repaired_report,repaired_curriculum,int(slide_count)) < repair_quality_key(lesson_report,curriculum_report,int(slide_count)):
-                        lesson_data,lesson_report,curriculum_report=repaired,repaired_report,repaired_curriculum
-                        st.success("Đã hoàn thiện cấu trúc và kiểm định lần hai.")
-                    else:
-                        st.warning("Lượt hoàn thiện không tốt hơn bản đầu; hệ thống giữ lại bản đầu để cô duyệt.")
-                except (AIQuotaUnavailable,ValueError) as repair_exc:
-                    st.warning(f"Chưa thể chạy lượt hoàn thiện: {repair_exc} Bản đầu vẫn được giữ nguyên.")
-            st.session_state["lesson_data_v6"]=lesson_data
-            st.session_state["lesson_config_v6"]=config
-            st.session_state["lesson_source_v6"]=source_text
-            st.session_state["lesson_report_v6"]=lesson_report
-            st.session_state["curriculum_report_v8"]=curriculum_report
-            st.session_state["storyboard_approved_v8"]=False
-            status.update(label="Đã tạo cấu trúc — mời thầy duyệt trước khi xuất", state="complete", expanded=False)
-                           
-    except json.JSONDecodeError:
-        st.error("AI trả về dữ liệu chưa đúng định dạng. Vui lòng bấm tạo lại.")
-    except ValueError as exc:
-        st.error(str(exc))
-    except AIQuotaUnavailable as exc:
-        st.error(str(exc))
-        st.info("Không cần tải lại tài liệu. Hãy giữ nguyên trang và thử lại sau, hoặc thay GEMINI_API_KEY trong Secrets.")
-    except Exception as e:
-        st.error(f"Lỗi: {str(e)}")
+st.subheader("2. Lesson Studio V8.1 — Xây bài giảng theo từng chặng 10 slide")
+st.caption("Lập bản đồ toàn bài → tạo từng chặng tối đa 10 slide → chống lặp → ghép → kiểm định → xuất PowerPoint.")
+batch_state=st.session_state.get("lesson_batch_v81")
+if batch_state:
+    completed=len(batch_state["lesson"].get("slides",[])); target=batch_state["config"].slide_count
+    st.progress(min(1.0,completed/max(1,target)),text=f"Đã hoàn thành {completed}/{target} slide")
+    if completed<target:
+        start,end=batch_range(completed,target,10)
+        if st.button(f"▶️ TẠO SLIDE {start}–{end}",type="primary",use_container_width=True):
+            try:
+                with st.status(f"Đang tạo chặng slide {start}–{end}…",expanded=True) as status:
+                    updated=generate_lesson_chunk(selected_model,available_models,batch_state["source_text"],batch_state["source_bytes"],batch_state["source_type"],batch_state["config"],batch_state["lesson"],notify=st.write)
+                    batch_state["lesson"]=updated; st.session_state["lesson_batch_v81"]=batch_state
+                    completed=len(updated["slides"])
+                    if completed>=target:
+                        report=audit_lesson(updated,target,batch_state["source_text"])
+                        curriculum=audit_curriculum(updated.get("lesson_profile",{}),updated.get("storyboard",[]),batch_state["config"].periods,len(updated["slides"]))
+                        st.session_state["lesson_data_v6"]=updated; st.session_state["lesson_config_v6"]=batch_state["config"]
+                        st.session_state["lesson_source_v6"]=batch_state["source_text"]; st.session_state["lesson_report_v6"]=report
+                        st.session_state["curriculum_report_v8"]=curriculum; st.session_state["storyboard_approved_v8"]=False
+                    status.update(label=f"Đã hoàn thành {completed}/{target} slide",state="complete",expanded=False)
+                st.rerun()
+            except (ValueError,AIQuotaUnavailable) as exc: st.error(str(exc))
+    else: st.success("Đã đủ số slide yêu cầu; hệ thống đã ghép và kiểm định toàn bài.")
+    with st.expander("Xem danh sách slide đã tạo"):
+        st.dataframe([{"STT":i,"Hoạt động":s.get("activity",""),"Tiêu đề":s.get("title","")} for i,s in enumerate(batch_state["lesson"].get("slides",[]),1)],use_container_width=True)
+    if st.button("🔄 BẮT ĐẦU LẠI BÀI GIẢNG",use_container_width=True):
+        for key in ("lesson_batch_v81","lesson_data_v6","lesson_config_v6","lesson_source_v6","lesson_report_v6","curriculum_report_v8","storyboard_approved_v8"):
+            st.session_state.pop(key,None)
+        st.rerun()
+else:
+    if st.button("🚀 TẠO 10 SLIDE ĐẦU",type="primary",use_container_width=True,disabled=uploaded is None):
+        try:
+            config=LessonConfig(teacher,school,grade,book,lesson,int(periods),student_level,int(slide_count),theme_name,include_answers,include_notes)
+            source_text,source_bytes,source_type=read_source(uploaded)
+            with st.status("Đang lập bản đồ toàn bài và tạo chặng đầu…",expanded=True) as status:
+                first=generate_lesson_chunk(selected_model,available_models,source_text,source_bytes,source_type,config,None,notify=st.write)
+                state={"config":config,"source_text":source_text,"source_bytes":source_bytes,"source_type":source_type,"lesson":first}
+                st.session_state["lesson_batch_v81"]=state
+                if len(first["slides"])>=config.slide_count:
+                    st.session_state["lesson_data_v6"]=first; st.session_state["lesson_config_v6"]=config; st.session_state["lesson_source_v6"]=source_text
+                    st.session_state["lesson_report_v6"]=audit_lesson(first,config.slide_count,source_text)
+                    st.session_state["curriculum_report_v8"]=audit_curriculum(first.get("lesson_profile",{}),first.get("storyboard",[]),config.periods,len(first["slides"]))
+                    st.session_state["storyboard_approved_v8"]=False
+                status.update(label=f"Đã tạo {len(first['slides'])}/{config.slide_count} slide",state="complete",expanded=False)
+            st.rerun()
+        except (ValueError,AIQuotaUnavailable) as exc: st.error(str(exc))
+        except Exception as exc: st.error(f"Lỗi: {exc}")
 
 lesson_data=st.session_state.get("lesson_data_v6")
 config=st.session_state.get("lesson_config_v6")
@@ -1133,9 +1174,9 @@ if lesson_data and config and report:
     try:
         pptx_bytes=build_pptx(lesson_data,config)
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename=f"{safe_name[:70]}_LessonStudioV8_0_2_CTGDPT2018.pptx"
+        filename=f"{safe_name[:70]}_LessonStudioV8_1_10SlideBuilder.pptx"
         export_locked=combined_fail or not st.session_state.get("storyboard_approved_v8",False)
-        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.0.2",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
+        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.1",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
         if combined_fail: st.error("Đã khóa xuất vì còn lỗi nghiêm trọng trong bài giảng hoặc storyboard.")
         elif not st.session_state.get("storyboard_approved_v8",False): st.warning("Hãy duyệt Hồ sơ bài học và Storyboard để mở khóa PowerPoint.")
         qa_payload={"lesson_qa":report,"curriculum_qa":curriculum_report}
