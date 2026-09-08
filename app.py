@@ -26,12 +26,12 @@ from pedagogy_engine import audit_pedagogy
 from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json, certificate
 from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
-from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table
+from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table, safe_autofix_lesson
 from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "7.2.0 P0 Safety Release"
+APP_VERSION = "7.2.1 P0.1 Safe Auto-Fix"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -920,7 +920,7 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Lesson Studio V7 — Math Premium")
+st.subheader("2. Lesson Studio V7.2.1 — Math Premium")
 st.caption("Tạo cấu trúc → kiểm định → xem trước/chỉnh sửa → xuất PowerPoint.")
 if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_container_width=True, disabled=uploaded is None):
     try:
@@ -961,6 +961,19 @@ if lesson_data and config and report:
     elif report["status"]=="REVIEW": st.warning("Bài giảng đã tạo nhưng còn điểm cần giáo viên duyệt.")
     else: st.success("ĐẠT KIỂM TRA KỸ THUẬT TỰ ĐỘNG — giáo viên vẫn phải duyệt nội dung Toán học và sư phạm.")
     if report["issues"]: st.dataframe(report["issues"],use_container_width=True)
+    if report["status"]=="FAIL":
+        if st.button("🛠️ TỰ SỬA AN TOÀN VÀ KIỂM ĐỊNH LẠI",use_container_width=True,type="primary"):
+            fixed_lesson,changes=safe_autofix_lesson(lesson_data)
+            new_report=audit_lesson(fixed_lesson,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+            st.session_state["lesson_data_v6"]=fixed_lesson
+            st.session_state["lesson_report_v6"]=new_report
+            st.session_state["lesson_safe_changes_v721"]=changes
+            st.rerun()
+    safe_changes=st.session_state.pop("lesson_safe_changes_v721",None)
+    if safe_changes:
+        st.success(f"Đã thực hiện {len(safe_changes)} sửa chữa an toàn và kiểm định lại.")
+        with st.expander("Xem các thay đổi an toàn"):
+            for change in safe_changes: st.write("• "+change)
     preview=[{"STT":i,"Hoạt động":s["activity"],"Layout":s["layout"],"Tiêu đề":s["title"],"Nhiệm vụ":s.get("question","")[:90],"Sản phẩm":s.get("product","")[:70]} for i,s in enumerate(lesson_data["slides"],1)]
     st.dataframe(preview,use_container_width=True,height=360)
     with st.expander("✏️ Chỉnh sửa JSON bài giảng trước khi xuất"):
@@ -976,8 +989,8 @@ if lesson_data and config and report:
     try:
         pptx_bytes=build_pptx(lesson_data,config)
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename=f"{safe_name[:70]}_LessonStudioV7_1_MathPremium_Stable.pptx"
-        st.download_button("📥 TẢI POWERPOINT MATH PREMIUM V7.1",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=report["status"]=="FAIL")
+        filename=f"{safe_name[:70]}_LessonStudioV7_2_1_P0_1_Safe_AutoFix.pptx"
+        st.download_button("📥 TẢI POWERPOINT MATH PREMIUM V7.2.1",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=report["status"]=="FAIL")
         if report["status"]=="FAIL": st.error("Đã khóa xuất PowerPoint vì còn lỗi nghiêm trọng. Hãy sửa JSON hoặc tạo lại cấu trúc.")
         st.download_button("📋 TẢI BÁO CÁO KIỂM ĐỊNH",json.dumps(report,ensure_ascii=False,indent=2),f"{safe_name[:70]}_QA.json","application/json",use_container_width=True)
     except Exception as exc: st.error(f"Không thể dựng PowerPoint: {exc}")

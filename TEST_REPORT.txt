@@ -1,7 +1,7 @@
-LESSON STUDIO V7.2 P0 — TEST REPORT
+LESSON STUDIO V7.2.1 P0.1 — TEST REPORT
 
 Ngày kiểm tra: 2026-09-07
-Kết quả: 8/8 PASSED
+Kết quả: 9/9 PASSED
 
 PASSED — Hai đề khác nhau tạo fingerprint khác nhau.
 PASSED — answer_index và check.correct_index đồng bộ sau khi đảo phương án.
@@ -11,6 +11,7 @@ PASSED — Parser từ chối truy cập thuộc tính.
 PASSED — Parser từ chối hàm ngoài danh sách cho phép.
 PASSED — Bảng biến thiên đúng được chấp nhận.
 PASSED — Bảng sai dấu hoặc bỏ sót điểm tới hạn bị từ chối.
+PASSED — Tự sửa an toàn ẩn bảng không kiểm chứng được, giữ nội dung và chuyển trạng thái sang REVIEW.
 
 Lệnh tái kiểm tra:
 python -m unittest discover -s tests -v

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import math
+import copy
 from collections import Counter
 from typing import Any
 from equation_engine import formula_diagnostics
@@ -22,7 +23,10 @@ def _text(value: Any, limit: int = 2000) -> str:
 
 INLINE_REPLACEMENTS={
     r"\infty":"∞",r"\leq":"≤",r"\le":"≤",r"\geq":"≥",r"\ge":"≥",r"\neq":"≠",r"\ne":"≠",
-    r"\Leftrightarrow":"⇔",r"\Rightarrow":"⇒",r"\rightarrow":"→",r"\backslash":"∖",r"\in":"∈",r"\pm":"±",r"\cdot":"·",r"\times":"×"
+    r"\Leftrightarrow":"⇔",r"\Rightarrow":"⇒",r"\rightarrow":"→",r"\backslash":"∖",r"\setminus":"∖",
+    r"\notin":"∉",r"\in":"∈",r"\subseteq":"⊆",r"\subset":"⊂",r"\cup":"∪",r"\cap":"∩",
+    r"\forall":"∀",r"\exists":"∃",r"\pm":"±",r"\cdot":"·",r"\times":"×",r"\alpha":"α",
+    r"\beta":"β",r"\gamma":"γ",r"\Delta":"Δ",r"\theta":"θ",r"\pi":"π"
 }
 
 
@@ -32,6 +36,12 @@ def _clean_inline_math(text: str) -> str:
         out=re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}",r"(\1)/(\2)",out)
         out=re.sub(r"\\sqrt\{([^{}]+)\}",r"√(\1)",out)
     for old,new in INLINE_REPLACEMENTS.items(): out=out.replace(old,new)
+    out=re.sub(r"\\mathbb\{R\}","ℝ",out)
+    out=re.sub(r"\\mathbb\{N\}","ℕ",out)
+    out=re.sub(r"\\mathbb\{Z\}","ℤ",out)
+    out=re.sub(r"\\mathbb\{Q\}","ℚ",out)
+    out=re.sub(r"\\(?:text|mathrm|mathbf)\{([^{}]*)\}",r"\1",out)
+    out=out.replace("$","")
     out=out.replace(r"\{","{").replace(r"\}","}")
     return out
 
@@ -153,12 +163,41 @@ def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
         raise ValueError("Các slide AI tạo ra không hợp lệ.")
     objectives = data.get("objectives", [])
     if not isinstance(objectives, list): objectives = [objectives]
-    return {"title": _text(data.get("title") or "Bài giảng Toán", 200), "objectives": [_text(x, 400) for x in objectives[:8] if _text(x)], "slides": slides}
+    return {"title": _text(data.get("title") or "Bài giảng Toán", 200), "objectives": [_clean_inline_math(_text(x, 400)) for x in objectives[:8] if _text(x)], "slides": slides, "_safety_repairs": list(data.get("_safety_repairs",[])) if isinstance(data.get("_safety_repairs",[]),list) else []}
+
+
+def safe_autofix_lesson(lesson: dict) -> tuple[dict,list[str]]:
+    """Apply only deterministic, content-preserving release repairs."""
+    fixed=copy.deepcopy(lesson); changes=[]; repairs=list(fixed.get("_safety_repairs",[]))
+    text_fields=("title","subtitle","question","product","answer")
+    for i,slide in enumerate(fixed.get("slides",[]),1):
+        table=slide.get("variation_table")
+        if table:
+            ok,detail=verify_variation_table(table)
+            if not ok:
+                slide["variation_table"]=None
+                note=f"Slide {i}: đã ẩn bảng biến thiên không kiểm chứng được ({detail})"
+                slide["teacher_note"]=(slide.get("teacher_note","")+"\n[SAFETY] "+note).strip()
+                changes.append(note); repairs.append(note)
+        for field in text_fields:
+            before=str(slide.get(field,"") or ""); after=_clean_inline_math(before)
+            if after!=before:
+                slide[field]=after; changes.append(f"Slide {i}: chuẩn hóa ký hiệu trong {field}.")
+        new_bullets=[]
+        for bullet in slide.get("bullets",[]):
+            after=_clean_inline_math(str(bullet)); new_bullets.append(after)
+            if after!=bullet: changes.append(f"Slide {i}: chuẩn hóa ký hiệu trong bullet.")
+        slide["bullets"]=new_bullets
+    fixed["_safety_repairs"]=list(dict.fromkeys(repairs))
+    return fixed,list(dict.fromkeys(changes))
 
 
 def audit_lesson(lesson: dict, requested_slides: int, source_text: str = "") -> dict:
     slides = lesson.get("slides", [])
     issues = []
+    repairs=lesson.get("_safety_repairs",[])
+    if repairs:
+        issues.append({"severity":"REVIEW","code":"SAFETY_AUTOFIX_APPLIED","message":f"Đã áp dụng {len(repairs)} sửa chữa an toàn; giáo viên cần duyệt các slide liên quan.","evidence":repairs})
     activities = Counter(s.get("activity") for s in slides)
     layouts = Counter(s.get("layout") for s in slides)
     if abs(len(slides) - requested_slides) > max(3, round(requested_slides * .15)):

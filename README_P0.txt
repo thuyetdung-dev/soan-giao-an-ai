@@ -1,4 +1,4 @@
-LESSON STUDIO V7.2 P0 SAFETY RELEASE
+LESSON STUDIO V7.2.1 P0.1 SAFE AUTO-FIX
 
 Các lỗi P0 đã xử lý:
 1. Chuẩn hóa toàn bộ tên tệp Python để chạy trực tiếp trên GitHub/Streamlit.
@@ -8,6 +8,9 @@ Các lỗi P0 đã xử lý:
 5. Đồng bộ answer_index, check.correct_index và đáp án chữ cái khi đảo phương án.
 6. Bổ sung kiểm thử tự động trong thư mục tests.
 7. Đổi nhãn CERTIFIED thành AUTO_QA_PASSED để không gây hiểu nhầm là đã được chuyên gia duyệt.
+8. Thêm nút TỰ SỬA AN TOÀN VÀ KIỂM ĐỊNH LẠI.
+9. Bảng biến thiên không kiểm chứng được sẽ bị ẩn khỏi PowerPoint, có ghi dấu trong Notes và báo REVIEW.
+10. Chuẩn hóa các lệnh LaTeX phổ biến trong textbox thành ký hiệu Unicode dễ đọc.
 
 CÁCH CHẠY KIỂM THỬ
 python -m unittest discover -s tests -v

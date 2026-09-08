@@ -3,7 +3,7 @@ import unittest
 import sympy as sp
 
 from adaptive_engine import variant_consistency
-from lesson_engine import verify_variation_table
+from lesson_engine import audit_lesson, safe_autofix_lesson, verify_variation_table
 from safe_math_parser import SafeMathError, parse_math_expression
 from v5_engine import build_variants, exam_fingerprint
 
@@ -52,6 +52,15 @@ class VariationTableTests(unittest.TestCase):
     def test_omitted_critical_point_fails(self):
         ok,_=verify_variation_table({"expression":"x**3-3*x","points":["-∞","1","+∞"],"interval_signs":["-","+"],"values":["-∞","-2","+∞"]})
         self.assertFalse(ok)
+
+    def test_safe_autofix_removes_only_unverified_table(self):
+        lesson={"title":"x","objectives":[],"slides":[{"title":"S","activity":"KHỞI ĐỘNG","layout":"content","bullets":[r"Tập xác định là \\mathbb{R}"],"formulas":[],"question":"","product":"","answer":"","teacher_note":"","source_ref":"","graph":None,"variation_table":{"expression":"x**2","points":["-∞","+∞"],"interval_signs":["+"],"values":["+∞","+∞"]}}]}
+        fixed,changes=safe_autofix_lesson(lesson)
+        self.assertIsNone(fixed["slides"][0]["variation_table"])
+        self.assertIn("ℝ",fixed["slides"][0]["bullets"][0])
+        self.assertTrue(changes)
+        report=audit_lesson(fixed,1)
+        self.assertNotEqual(report["status"],"PASS")
 
 
 if __name__ == "__main__":
