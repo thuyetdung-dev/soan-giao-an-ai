@@ -1,7 +1,12 @@
-LESSONSTUDIO V8.4.1 — TEST REPORT
+LESSONSTUDIO V8.5 — TEST REPORT
 
 Ngày kiểm tra: 2026-09-08
-Kết quả: 36/36 PASSED
+Kết quả trước nâng cấp: 36/36 PASSED
+Kiểm tra V8.5 tại môi trường đóng gói: py_compile PASSED.
+Lưu ý: 6 ca HTML Studio đã được bổ sung nhưng cần chạy lại sau khi cài requirements.txt;
+môi trường đóng gói hiện không có sẵn sympy/streamlit và không cho tải gói mạng.
+
+V8.5 bổ sung 6 kiểm thử HTML Studio: data URI, escape HTML, đồ thị PNG, bảng biến thiên, JSON → HTML và tài liệu responsive UTF-8.
 
 Bản vá 8.4.1 bổ sung kiểm thử hồi quy build_prompt để ngăn lỗi Invalid format specifier.
 

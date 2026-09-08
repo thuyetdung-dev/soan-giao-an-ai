@@ -31,6 +31,7 @@ from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table
 from visual_engine import paginate_lesson
 from visual_recovery_engine import recover_lesson_visuals, recover_slide_visual, attach_teacher_asset, pending_visuals, approve_recovered_visuals
 from source_asset_extractor import extract_docx_assets
+from html_studio import render_html_studio
 from curriculum_engine import audit_curriculum, repair_quality_key, structural_defects
 from ai_resilience import AIQuotaUnavailable, generate_with_fallback
 from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan, validate_source_batch
@@ -38,7 +39,7 @@ from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.4.1 Visual Recovery & Teacher Asset Hub"
+APP_VERSION = "8.5.0 MathViz HTML Studio"
 MAX_UPLOAD_MB = 20
 MAX_TOTAL_UPLOAD_MB = 50
 MAX_SOURCE_FILES = 8
@@ -857,8 +858,8 @@ st.caption(f"Phiên bản {APP_VERSION} • Đồ họa Toán học AST • Ch�
 
 api_key = get_api_key()
 with st.sidebar:
-    mode = st.radio("Chế độ làm việc", ["Tạo bài giảng PowerPoint", "🏭 AI Exam Factory V5.0", "🧬 Exam Intelligence V5.0", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"], index=0)
-if not api_key and mode not in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°", "🧬 Exam Intelligence V5.0"}:
+    mode = st.radio("Chế độ làm việc", ["Tạo bài giảng PowerPoint", "🖼️ Xưởng Ảnh → HTML", "🏭 AI Exam Factory V5.0", "🧬 Exam Intelligence V5.0", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"], index=0)
+if not api_key and mode not in {"🖼️ Xưởng Ảnh → HTML", "Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°", "🧬 Exam Intelligence V5.0"}:
     st.error("Chưa cấu hình GEMINI_API_KEY trong Secrets. Chế độ Thẩm định đề Toán Pro vẫn chạy offline không cần API.")
     st.stop()
 
@@ -889,6 +890,10 @@ with st.sidebar:
     except Exception:
         available_models = ["models/gemini-2.5-flash-lite","models/gemini-2.5-flash","models/gemini-2.0-flash","models/gemini-1.5-flash"]
         selected_model = "models/gemini-1.5-flash"
+
+if mode == "🖼️ Xưởng Ảnh → HTML":
+    render_html_studio(st)
+    st.stop()
 
 st.subheader("1. Tải tài liệu nguồn")
 is_lesson_mode=mode=="Tạo bài giảng PowerPoint"
@@ -1095,9 +1100,9 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Lesson Studio V8.4 — Visual Recovery & Teacher Asset Hub")
+st.subheader("2. LessonStudio V8.5 — MathViz HTML Studio")
 st.caption("Math Visual First: visual bắt buộc → tạo từng chặng → chống lặp → kiểm định mật độ → xuất PowerPoint.")
-checkpoint_upload=st.file_uploader("Khôi phục từ checkpoint JSON V8.2/V8.3/V8.4",type=["json"],key="checkpoint_v84")
+checkpoint_upload=st.file_uploader("Khôi phục từ checkpoint JSON V8.2/V8.3/V8.4/V8.5",type=["json"],key="checkpoint_v84")
 if checkpoint_upload and st.button("♻️ KHÔI PHỤC CHECKPOINT",use_container_width=True):
     try:
         restored=validate_lesson(json.loads(checkpoint_upload.getvalue().decode("utf-8-sig")))
@@ -1296,7 +1301,7 @@ if lesson_data and config and report:
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
         filename=f"{safe_name[:70]}_LessonStudioV8_4_VisualRecovery.pptx"
         export_locked=combined_fail or not st.session_state.get("storyboard_approved_v8",False)
-        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.4",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
+        st.download_button("📥 TẢI POWERPOINT LESSONSTUDIO V8.5",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
         if combined_fail: st.error("Đã khóa xuất vì còn lỗi nghiêm trọng trong bài giảng hoặc storyboard.")
         elif not st.session_state.get("storyboard_approved_v8",False): st.warning("Hãy duyệt Hồ sơ bài học và Storyboard để mở khóa PowerPoint.")
         qa_payload={"lesson_qa":report,"curriculum_qa":curriculum_report}
