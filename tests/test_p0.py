@@ -1,4 +1,6 @@
 import unittest
+import io
+from PIL import Image
 
 import sympy as sp
 
@@ -9,6 +11,8 @@ from curriculum_engine import audit_curriculum, normalize_profile, normalize_sto
 from lesson_engine import audit_lesson, safe_autofix_lesson, verify_variation_table
 from safe_math_parser import SafeMathError, parse_math_expression
 from v5_engine import build_variants, exam_fingerprint
+from visual_engine import audit_visual_contract, density_budget, paginate_lesson
+from visual_recovery_engine import infer_expression, recover_slide_visual, attach_teacher_asset, approve_recovered_visuals, build_variation_table
 
 
 class SafeParserTests(unittest.TestCase):
@@ -166,6 +170,63 @@ class ChunkBuilderTests(unittest.TestCase):
             def getvalue(self): return self.data
         self.assertTrue(validate_source_batch([Upload(10),Upload(20),Upload(30)])[0])
         self.assertFalse(validate_source_batch([Upload(1)]*9)[0])
+
+
+class MathVisualFirstTests(unittest.TestCase):
+    def test_graph_reference_without_graph_is_fail(self):
+        slide={"title":"Đọc đồ thị", "bullets":["Quan sát Hình 1.5 và xác định khoảng đồng biến"], "layout":"visual"}
+        codes={x["code"] for x in audit_visual_contract(slide,1)}
+        self.assertIn("MISSING_GRAPH_OR_IMAGE",codes)
+
+    def test_variation_reference_without_table_is_fail(self):
+        slide={"title":"Lập bảng biến thiên", "bullets":[], "layout":"content"}
+        codes={x["code"] for x in audit_visual_contract(slide,2)}
+        self.assertIn("MISSING_VARIATION_TABLE",codes)
+
+    def test_visual_contract_passes_with_graph(self):
+        slide={"title":"Đọc đồ thị", "bullets":[], "layout":"visual", "graph":{"expression":"x**2"}}
+        self.assertEqual(audit_visual_contract(slide,1),[])
+
+    def test_dense_slide_is_split_before_render(self):
+        slide={"title":"Ví dụ", "bullets":["A"*130,"B"*130,"C"*130,"D"*130], "question":"Q"*100,
+               "product":"Phiếu", "answer":"Đáp án", "formulas":[], "graph":None, "variation_table":None}
+        self.assertTrue(density_budget(slide)["overflow_risk"])
+        lesson=paginate_lesson({"slides":[slide]})
+        self.assertEqual(len(lesson["slides"]),2)
+
+
+class VisualRecoveryV84Tests(unittest.TestCase):
+    def test_infers_explicit_function_only(self):
+        self.assertEqual(infer_expression({"formulas":["f(x)=x**3-3*x"]}),"x**3-3*x")
+        self.assertEqual(infer_expression({"bullets":["Quan sát đồ thị đã cho"]}),"")
+
+    def test_recovers_graph_from_verified_expression(self):
+        slide={"title":"Quan sát đồ thị", "bullets":["Cho y=x**2-2*x"], "layout":"visual"}
+        fixed,result=recover_slide_visual(slide)
+        self.assertEqual(result["status"],"AUTO_GENERATED")
+        self.assertEqual(fixed["graph"]["expression"],"x**2-2*x")
+        self.assertFalse(fixed["graph"]["teacher_approved"])
+
+    def test_builds_verified_cubic_variation_table(self):
+        table,detail=build_variation_table("x**3-3*x")
+        self.assertIsNotNone(table,detail)
+        self.assertEqual(table["interval_signs"],["+","-","+"])
+        self.assertEqual(table["points"],["-∞","-1","1","+∞"])
+
+    def test_requests_teacher_asset_when_data_missing(self):
+        _,result=recover_slide_visual({"title":"Quan sát Hình 1.5", "bullets":[], "layout":"visual"})
+        self.assertEqual(result["status"],"WAITING_FOR_TEACHER_ASSET")
+
+    def test_teacher_image_satisfies_contract(self):
+        buf=io.BytesIO(); Image.new("RGB",(40,30),"white").save(buf,format="PNG")
+        slide=attach_teacher_asset({"title":"Quan sát Hình 1.5","layout":"visual"},buf.getvalue(),"hinh.png","image/png")
+        self.assertEqual(audit_visual_contract(slide,1),[])
+
+    def test_approval_unlocks_auto_visual(self):
+        lesson={"slides":[{"title":"Đồ thị", "layout":"visual", "graph":{"expression":"x**2","recovery_status":"AUTO_GENERATED","teacher_approved":False}}]}
+        self.assertTrue(audit_visual_contract(lesson["slides"][0],1))
+        approved=approve_recovered_visuals(lesson,1)
+        self.assertEqual(audit_visual_contract(approved["slides"][0],1),[])
 
 if __name__ == "__main__":
     unittest.main()

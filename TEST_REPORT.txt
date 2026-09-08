@@ -1,7 +1,21 @@
-LESSON STUDIO V8.2 — TEST REPORT
+LESSONSTUDIO V8.4 — TEST REPORT
 
 Ngày kiểm tra: 2026-09-08
-Kết quả: 25/25 PASSED
+Kết quả: 35/35 PASSED
+
+Bổ sung 6 kiểm thử Visual Recovery & Teacher Asset Hub:
+- Chỉ nhận diện biểu thức hàm được viết rõ ràng.
+- Tự khôi phục đồ thị từ biểu thức đã kiểm tra.
+- Tự dựng đúng bảng biến thiên của hàm bậc ba kiểm chứng được.
+- Yêu cầu giáo viên cung cấp hình khi thiếu dữ liệu.
+- Ảnh hợp lệ do giáo viên tải lên thỏa Visual Contract.
+- Visual tự dựng chỉ được mở khóa sau khi giáo viên duyệt.
+
+Bổ sung 4 kiểm thử Math Visual First:
+- Phát hiện slide tham chiếu đồ thị nhưng không có graph/image.
+- Phát hiện slide nhắc bảng biến thiên nhưng không có variation_table.
+- Chấp nhận slide visual có graph hợp lệ về cấu trúc.
+- Tự tách slide vượt ngân sách mật độ trước khi render.
 
 PASSED — Hai đề khác nhau tạo fingerprint khác nhau.
 PASSED — answer_index và check.correct_index đồng bộ sau khi đảo phương án.

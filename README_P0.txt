@@ -1,4 +1,4 @@
-LESSON STUDIO V8.2 — MULTI-SOURCE & CHECKPOINT REVIEW
+LESSON STUDIO V8.3 — MATH VISUAL FIRST (LỊCH SỬ NỀN TẢNG V8.2)
 
 NÂNG CẤP V8.2
 1. Cho phép chọn đồng thời tối đa 8 tệp nguồn PDF, DOCX, TXT hoặc JSON; tổng dung lượng tối đa 50 MB.

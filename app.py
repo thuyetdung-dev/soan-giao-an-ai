@@ -1,4 +1,5 @@
 import ast
+import base64
 import io
 import json
 import math
@@ -27,6 +28,9 @@ from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json,
 from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
 from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table, safe_autofix_lesson
+from visual_engine import paginate_lesson
+from visual_recovery_engine import recover_lesson_visuals, recover_slide_visual, attach_teacher_asset, pending_visuals, approve_recovered_visuals
+from source_asset_extractor import extract_docx_assets
 from curriculum_engine import audit_curriculum, repair_quality_key, structural_defects
 from ai_resilience import AIQuotaUnavailable, generate_with_fallback
 from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan, validate_source_batch
@@ -34,7 +38,7 @@ from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.2.0 Multi-Source + Checkpoint Review"
+APP_VERSION = "8.4.0 Visual Recovery & Teacher Asset Hub"
 MAX_UPLOAD_MB = 20
 MAX_TOTAL_UPLOAD_MB = 50
 MAX_SOURCE_FILES = 8
@@ -337,7 +341,10 @@ NGUYÊN TẮC NỘI DUNG:
 - Mỗi hoạt động phải mô tả rõ việc học sinh làm, sản phẩm quan sát được, cách đánh giá, câu hỏi gợi mở, khó khăn dự kiến, hỗ trợ và kết luận cần chốt.
 - learning_outcomes phải gắn với một năng lực Toán học phù hợp, minh chứng và cách đánh giá; không gắn đủ mọi năng lực nếu bài học không thực sự kích hoạt.
 
-ĐỒ HỌA TÙY CHỌN:
+ĐỒ HỌA TOÁN HỌC BẮT BUỘC KHI NỘI DUNG CẦN QUAN SÁT:
+- Không được viết "quan sát hình", "dựa vào đồ thị", "theo bảng biến thiên" hoặc tham chiếu Hình 1.x nếu không cung cấp graph, variation_table hoặc image_asset tương ứng.
+- Bài về tính đơn điệu/cực trị phải ưu tiên đồ thị, bảng dấu và bảng biến thiên; visual là thành phần sư phạm, không phải trang trí.
+- Nếu đủ biểu thức để tái tạo, bắt buộc dùng graph hoặc variation_table có expression kiểm chứng được.
 - graph: {{"expression":"x**3-3*x", "x_min":-5, "x_max":5, "caption":"..."}}. Chỉ dùng Python math chuẩn (sin, cos, exp).
 - variation_table: {{"expression":"x**3-3*x", "points":["-∞","-1","1","+∞"], "interval_signs":["+","-","+"], "values":["-∞","2","-2","+∞"]}}. Trường expression là bắt buộc và phải là biểu thức Python/SymPy tương ứng đúng với hàm số để hệ thống tự kiểm chứng bảng.
 
@@ -378,6 +385,8 @@ Trả về duy nhất JSON chuẩn:
     "source_ref":"Tên tài liệu, mục hoặc trang làm căn cứ cho slide",
     "graph":null,
     "variation_table":null
+	,"image_asset":null,
+	"visual_requirement":{"required":false,"type":"function_graph|variation_table|source_image","reason":""}
   }}]
 }}
 """
@@ -550,9 +559,8 @@ def add_answer_box(slide, answer: str, theme):
     shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.82), Inches(5.58), Inches(11.7), Inches(1.12))
     shape.fill.solid(); shape.fill.fore_color.rgb = RGBColor(*theme["light"])
     shape.line.color.rgb = RGBColor(*theme["accent"])
-    size = 14 if len(answer) < 260 else 12
-    box = add_text(slide, "ĐÁP ÁN/GỢI Ý: " + answer, 1.0, 5.72, 11.3, .82, size, theme["primary"], True)
-    box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    size = 19 if len(answer) < 220 else 17
+    add_text(slide, "ĐÁP ÁN/GỢI Ý: " + answer, 1.0, 5.72, 11.3, .82, size, theme["primary"], True)
 
 
 def add_panel(slide, left, top, width, height, fill, line=None, radius=True):
@@ -566,25 +574,24 @@ def add_panel(slide, left, top, width, height, fill, line=None, radius=True):
 
 def add_formula_block(slide, formulas: list[str], left: float, top: float, width: float, theme):
     if not formulas: return
-    height = min(1.35, .42 + .38 * len(formulas))
+    formulas=formulas[:2]
+    height = min(.96, .42 + .27 * len(formulas))
     add_panel(slide, left, top, width, height, theme["light"], theme["accent"])
     row_height=(height-.16)/max(1,len(formulas))
     for index,formula in enumerate(formulas):
         add_native_equation(slide,formula,left+.16,top+.08+index*row_height,width-.32,row_height,22,theme["primary"])
 
 
-def add_learning_task(slide, slide_data, theme, top=4.85):
+def add_learning_task(slide, slide_data, theme, top=4.78):
     question=slide_data.get("question",""); product=slide_data.get("product","")
-    longest=max(len(question),len(product)); panel_h=1.02 if longest>85 else .82
-    font_size=13 if longest>120 else 14 if longest>80 else 15
+    longest=max(len(question),len(product)); panel_h=.86
+    font_size=19 if longest<=100 else 17
     if question:
         add_panel(slide,.82,top,7.6,panel_h,theme["light"],theme["accent"])
         task_box=add_text(slide,"NHIỆM VỤ  •  "+question,1.02,top+.1,7.2,panel_h-.18,font_size,theme["primary"],True,valign=MSO_ANCHOR.MIDDLE)
-        task_box.text_frame.auto_size=MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     if product:
         add_panel(slide,8.65,top,3.87,panel_h,(248,249,250),(205,211,217))
         product_box=add_text(slide,"SẢN PHẨM  •  "+product,8.83,top+.1,3.5,panel_h-.18,max(12,font_size-1),(55,65,72),True,valign=MSO_ANCHOR.MIDDLE)
-        product_box.text_frame.auto_size=MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
 
 def add_native_variation_table(slide, data, left, top, width, height, theme):
@@ -615,6 +622,7 @@ def add_native_variation_table(slide, data, left, top, width, height, theme):
     return True
 
 def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
+    lesson = paginate_lesson(lesson)
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
     blank = prs.slide_layouts[6]
@@ -688,7 +696,11 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
                 continue
             add_header(slide, title, activity, theme, page)
             visual = None
-            if chunk_index == 0 and slide_data.get("graph"):
+            image_asset=slide_data.get("image_asset")
+            if chunk_index==0 and isinstance(image_asset,dict) and image_asset.get("data_base64"):
+                try: visual=io.BytesIO(base64.b64decode(image_asset["data_base64"],validate=True))
+                except Exception: visual=None
+            if visual is None and chunk_index == 0 and slide_data.get("graph"):
                 try:
                     visual = create_graph(slide_data["graph"])
                 except (ValueError, SyntaxError, TypeError):
@@ -716,7 +728,7 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
                     circle=slide.shapes.add_shape(MSO_SHAPE.OVAL,Inches(left+.12),Inches(1.96),Inches(.68),Inches(.68)); circle.fill.solid(); circle.fill.fore_color.rgb=RGBColor(*theme["accent"]); circle.line.fill.background()
                     add_text(slide,str(idx+1),left+.18,2.03,.55,.55,25,(255,255,255),True,PP_ALIGN.CENTER,valign=MSO_ANCHOR.MIDDLE)
                     add_text(slide,item,left+.18,2.82,step_w-.55,1.25,17,(43,48,53),True,PP_ALIGN.CENTER)
-                add_formula_block(slide,formulas,2.25,4.62,8.8,theme)
+                add_formula_block(slide,formulas,2.25,3.88,8.8,theme)
             elif layout in {"concept","example","compare"} and not visual:
                 add_panel(slide,.82,1.75,7.25,3.65,(255,255,255),(215,221,226))
                 add_bullets(slide,chunk,1.04,2.02,6.8,3.05,20)
@@ -727,25 +739,31 @@ def build_pptx(lesson: dict[str, Any], config: LessonConfig) -> bytes:
             elif visual:
                 # ÉP CHIỀU RỘNG CHỮ TỐI ĐA LÀ 7.0 INCH (~1/2 trang theo chiều ngang)
                 # Chữ chạy tới mốc này sẽ TỰ ĐỘNG rớt dòng, hoàn toàn không che lấp Hình bên phải.
-                add_bullets(slide, chunk, .75, 1.72, 7.0, content_bottom - 1.72, 21)
+                add_bullets(slide, chunk, .75, 1.72, 7.0, 3.0, 22)
                 
                 # Cố định hình vẽ/bảng biến thiên ở góc trên bên phải
                 slide.shapes.add_picture(visual, Inches(8.2), Inches(1.08), width=Inches(4.8))
             else:
                 size = 23 if sum(map(len, chunk)) < 280 else 21
-                body_bottom=4.72 if slide_data.get("question") or slide_data.get("product") else content_bottom
+                body_bottom=3.62 if formulas else 4.62 if slide_data.get("question") or slide_data.get("product") else 6.55
                 add_bullets(slide, chunk, .82, 1.72, 11.7, body_bottom - 1.72, size)
-                if formulas: add_formula_block(slide,formulas,2.15,max(3.75,body_bottom-.9),9.0,theme)
+                if formulas: add_formula_block(slide,formulas,2.15,3.72,9.0,theme)
 
             if (slide_data.get("question") or slide_data.get("product")) and layout not in {"concept","example","compare"}:
-                add_learning_task(slide,slide_data,theme,4.56 if native_variation else 4.55 if has_answer else 4.78)
+                add_learning_task(slide,slide_data,theme,4.62 if native_variation else 4.78)
                 
-            if has_answer:
-                add_answer_box(slide, slide_data["answer"], theme)
             if config.include_notes and (slide_data.get("teacher_note") or slide_data.get("source_ref")):
                 notes_frame = slide.notes_slide.notes_text_frame
                 notes_frame.text = (slide_data.get("teacher_note","")+"\n\n[Sources]\n- "+(slide_data.get("source_ref") or "Tài liệu nguồn người dùng cung cấp")).strip()
             page += 1
+            if has_answer:
+                answer_slide=prs.slides.add_slide(blank); add_full_background(answer_slide,(255,255,255))
+                add_header(answer_slide,"Đáp án và gợi ý — "+slide_data["title"],activity,theme,page)
+                add_panel(answer_slide,.82,1.72,11.7,4.85,theme["light"],theme["accent"])
+                add_text(answer_slide,slide_data["answer"],1.12,2.02,11.1,4.2,22,theme["primary"],False)
+                if config.include_notes and slide_data.get("source_ref"):
+                    answer_slide.notes_slide.notes_text_frame.text="[Sources]\n- "+slide_data["source_ref"]
+                page += 1
 
     output = io.BytesIO()
     prs.save(output)
@@ -1077,8 +1095,25 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Lesson Studio V8.2 — Nhiều nguồn & duyệt từng chặng")
-st.caption("Lập bản đồ toàn bài → tạo từng chặng tối đa 10 slide → chống lặp → ghép → kiểm định → xuất PowerPoint.")
+st.subheader("2. Lesson Studio V8.4 — Visual Recovery & Teacher Asset Hub")
+st.caption("Math Visual First: visual bắt buộc → tạo từng chặng → chống lặp → kiểm định mật độ → xuất PowerPoint.")
+checkpoint_upload=st.file_uploader("Khôi phục từ checkpoint JSON V8.2/V8.3/V8.4",type=["json"],key="checkpoint_v84")
+if checkpoint_upload and st.button("♻️ KHÔI PHỤC CHECKPOINT",use_container_width=True):
+    try:
+        restored=validate_lesson(json.loads(checkpoint_upload.getvalue().decode("utf-8-sig")))
+        config=LessonConfig(teacher,school,grade,book,lesson,int(periods),student_level,int(slide_count),theme_name,include_answers,include_notes)
+        source_text,source_parts,source_manifest=read_sources(uploaded)
+        st.session_state["lesson_batch_v81"]={"config":config,"source_text":source_text,"source_parts":source_parts,"source_manifest":source_manifest,"lesson":restored}
+        if len(restored.get("slides",[]))>=config.slide_count:
+            st.session_state["lesson_data_v6"]=restored; st.session_state["lesson_config_v6"]=config
+            st.session_state["lesson_source_v6"]=source_text
+            st.session_state["lesson_report_v6"]=audit_lesson(restored,config.slide_count,source_text)
+            st.session_state["curriculum_report_v8"]=audit_curriculum(restored.get("lesson_profile",{}),restored.get("storyboard",[]),config.periods,len(restored.get("slides",[])))
+            st.session_state["storyboard_approved_v8"]=False
+        st.success(f"Đã khôi phục {len(restored.get('slides',[]))} slide; cần duyệt lại trước khi xuất.")
+        st.rerun()
+    except Exception as exc:
+        st.error(f"Không thể khôi phục checkpoint: {exc}")
 batch_state=st.session_state.get("lesson_batch_v81")
 if batch_state:
     completed=len(batch_state["lesson"].get("slides",[])); target=batch_state["config"].slide_count
@@ -1141,6 +1176,62 @@ report=st.session_state.get("lesson_report_v6")
 curriculum_report=st.session_state.get("curriculum_report_v8")
 if lesson_data and config and report:
     st.markdown("### 3. Kiểm định và xem trước")
+    st.markdown("#### 🖼️ Visual Recovery & Teacher Asset Hub")
+    missing_now=pending_visuals(lesson_data)
+    if missing_now:
+        st.error(f"Còn {len(missing_now)} slide thiếu visual hoặc visual tự dựng chưa được duyệt.")
+        st.dataframe([{"Slide":x["slide"],"Tiêu đề":x["title"],"Vấn đề":" | ".join(x["issues"])} for x in missing_now],use_container_width=True)
+        if st.button("✨ TỰ ĐỘNG KHÔI PHỤC VISUAL KHI ĐỦ BIỂU THỨC",type="primary",use_container_width=True):
+            recovered,recovery_log=recover_lesson_visuals(lesson_data)
+            st.session_state["lesson_data_v6"]=recovered
+            st.session_state["lesson_batch_v81"]["lesson"]=recovered
+            st.session_state["lesson_report_v6"]=audit_lesson(recovered,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+            st.session_state["visual_recovery_log_v84"]=recovery_log
+            st.session_state["storyboard_approved_v8"]=False
+            st.rerun()
+        target=st.selectbox("Chọn slide để bổ sung/duyệt visual",[x["slide"] for x in missing_now],format_func=lambda n:f"Slide {n}: {lesson_data['slides'][n-1].get('title','')}")
+        auto_asset=any(isinstance(lesson_data["slides"][target-1].get(k),dict) and lesson_data["slides"][target-1][k].get("recovery_status")=="AUTO_GENERATED" for k in ("graph","variation_table"))
+        if auto_asset and st.button("✅ DUYỆT VISUAL TỰ ĐỘNG CỦA SLIDE NÀY",use_container_width=True):
+            approved=approve_recovered_visuals(lesson_data,target)
+            st.session_state["lesson_data_v6"]=approved; st.session_state["lesson_batch_v81"]["lesson"]=approved
+            st.session_state["lesson_report_v6"]=audit_lesson(approved,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+            st.session_state["storyboard_approved_v8"]=False; st.rerun()
+        manual_expression=st.text_input("Hoặc nhập biểu thức để hệ thống tự dựng",placeholder="Ví dụ: x**3-3*x+2",key=f"visual_expression_{target}")
+        if manual_expression.strip() and st.button("📈 DỰNG VISUAL TỪ BIỂU THỨC",use_container_width=True):
+            candidate=dict(lesson_data["slides"][target-1]); candidate["formulas"]=list(candidate.get("formulas",[]))+["f(x)="+manual_expression.strip()]
+            recovered_slide,recovery_result=recover_slide_visual(candidate)
+            if recovery_result["status"]!="AUTO_GENERATED": st.error(recovery_result["message"])
+            else:
+                updated=dict(lesson_data); updated["slides"]=list(lesson_data["slides"]); updated["slides"][target-1]=recovered_slide
+                st.session_state["lesson_data_v6"]=updated; st.session_state["lesson_batch_v81"]["lesson"]=updated
+                st.session_state["lesson_report_v6"]=audit_lesson(updated,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+                st.session_state["visual_recovery_log_v84"]=[{"slide":target,"title":candidate.get("title",""),**recovery_result}]
+                st.session_state["storyboard_approved_v8"]=False; st.rerun()
+        teacher_image=st.file_uploader("Tải ảnh cho slide đã chọn (PNG, JPG/JPEG, WEBP; tối đa 12 MB)",type=["png","jpg","jpeg","webp"],key=f"teacher_asset_{target}")
+        if teacher_image and st.button("📌 GẮN ẢNH VÀO SLIDE",use_container_width=True):
+            updated=dict(lesson_data); updated["slides"]=list(lesson_data["slides"])
+            updated["slides"][target-1]=attach_teacher_asset(updated["slides"][target-1],teacher_image.getvalue(),teacher_image.name,teacher_image.type)
+            st.session_state["lesson_data_v6"]=updated; st.session_state["lesson_batch_v81"]["lesson"]=updated
+            st.session_state["lesson_report_v6"]=audit_lesson(updated,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+            st.session_state["storyboard_approved_v8"]=False; st.rerun()
+        source_assets=[]
+        for source_file in list(uploaded or []):
+            if str(source_file.name).lower().endswith(".docx"):
+                source_assets.extend(extract_docx_assets(source_file.getvalue(),source_file.name))
+        if source_assets:
+            chosen_asset=st.selectbox("Hoặc chọn ảnh được trích từ tài liệu Word",range(len(source_assets)),format_func=lambda i:source_assets[i]["asset_id"])
+            if st.button("📚 GẮN ẢNH TỪ TÀI LIỆU NGUỒN",use_container_width=True):
+                asset=source_assets[chosen_asset]; updated=dict(lesson_data); updated["slides"]=list(lesson_data["slides"])
+                updated["slides"][target-1]=attach_teacher_asset(updated["slides"][target-1],asset["bytes"],asset["filename"],asset["mime_type"])
+                updated["slides"][target-1]["image_asset"]["source_ref"]=asset["asset_id"]
+                st.session_state["lesson_data_v6"]=updated; st.session_state["lesson_batch_v81"]["lesson"]=updated
+                st.session_state["lesson_report_v6"]=audit_lesson(updated,int(config.slide_count),st.session_state.get("lesson_source_v6",""))
+                st.session_state["storyboard_approved_v8"]=False; st.rerun()
+    else:
+        st.success("Mọi slide cần trực quan đã có visual và đã được duyệt.")
+    recovery_log=st.session_state.pop("visual_recovery_log_v84",None)
+    if recovery_log:
+        with st.expander("Nhật ký Visual Recovery",expanded=True): st.dataframe(recovery_log,use_container_width=True)
     a,b,c,d=st.columns(4)
     a.metric("Slide nội dung",report["summary"]["slides"])
     b.metric("Điểm QA",report["score"])
@@ -1203,9 +1294,9 @@ if lesson_data and config and report:
     try:
         pptx_bytes=build_pptx(lesson_data,config)
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename=f"{safe_name[:70]}_LessonStudioV8_2_MultiSource_Checkpoints.pptx"
+        filename=f"{safe_name[:70]}_LessonStudioV8_4_VisualRecovery.pptx"
         export_locked=combined_fail or not st.session_state.get("storyboard_approved_v8",False)
-        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.2",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
+        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.4",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
         if combined_fail: st.error("Đã khóa xuất vì còn lỗi nghiêm trọng trong bài giảng hoặc storyboard.")
         elif not st.session_state.get("storyboard_approved_v8",False): st.warning("Hãy duyệt Hồ sơ bài học và Storyboard để mở khóa PowerPoint.")
         qa_payload={"lesson_qa":report,"curriculum_qa":curriculum_report}

@@ -9,6 +9,7 @@ from typing import Any
 from equation_engine import formula_diagnostics
 from safe_math_parser import SafeMathError, parse_math_expression, parse_numeric
 from curriculum_engine import normalize_profile, normalize_storyboard
+from visual_engine import audit_visual_contract, density_budget, infer_visual_requirement
 try:
     import sympy as sp
 except Exception:
@@ -159,6 +160,8 @@ def normalize_lesson(data: Any, max_slides: int = 60) -> dict:
             "source_ref": _text(raw.get("source_ref"), 500),
             "graph": raw.get("graph") if isinstance(raw.get("graph"), dict) else None,
             "variation_table": raw.get("variation_table") if isinstance(raw.get("variation_table"), dict) else None,
+            "image_asset": raw.get("image_asset") if isinstance(raw.get("image_asset"), dict) else None,
+            "visual_requirement": infer_visual_requirement(raw),
         })
     if not slides:
         raise ValueError("Các slide AI tạo ra không hợp lệ.")
@@ -216,6 +219,13 @@ def audit_lesson(lesson: dict, requested_slides: int, source_text: str = "") -> 
     for i,s in enumerate(slides,1):
         row=[]; chars=sum(len(x) for x in s.get("bullets",[]))+len(s.get("question","")+s.get("answer",""))
         if chars>650 or len(s.get("bullets",[]))>6: row.append("Mật độ chữ cao")
+        budget=density_budget(s)
+        if budget["overflow_risk"]:
+            row.append(f"Nguy cơ tràn/chồng: {budget['chars']} ký tự, {budget['blocks']} khối")
+            issues.append({"severity":"FAIL","code":"LAYOUT_OVERFLOW_RISK","message":f"Slide {i} vượt ngân sách trình chiếu; phải tách trang trước khi xuất.","evidence":budget})
+        visual_issues=audit_visual_contract(s,i)
+        issues.extend(visual_issues)
+        row.extend(x["message"] for x in visual_issues)
         if not s.get("bullets") and not s.get("question") and not s.get("formulas") and not s.get("graph") and not s.get("variation_table") and s.get("layout")!="section": row.append("Thiếu nội dung chính")
         if s.get("layout") in {"practice","quiz"} and not s.get("question"): row.append("Thiếu câu hỏi/nhiệm vụ")
         if s.get("layout") in {"practice","quiz"} and not s.get("product"): row.append("Chưa nêu sản phẩm học tập")
@@ -230,7 +240,8 @@ def audit_lesson(lesson: dict, requested_slides: int, source_text: str = "") -> 
                 row.append("Bảng biến thiên chưa đạt: "+detail)
                 issues.append({"severity":"FAIL","code":"UNVERIFIED_VARIATION_TABLE","message":f"Slide {i}: {detail}"})
         if source_text.strip() and not s.get("source_ref"): row.append("Chưa ghi tham chiếu nguồn trong Notes")
-        rows.append({"slide":i,"title":s.get("title"),"status":"REVIEW" if row else "PASS","issues":row})
+        row_has_fail=bool(visual_issues) or budget["overflow_risk"] or bool(s.get("variation_table") and not verify_variation_table(s["variation_table"])[0])
+        rows.append({"slide":i,"title":s.get("title"),"status":"FAIL" if row_has_fail else "REVIEW" if row else "PASS","issues":row})
     if source_text.strip():
         source_words=set(re.findall(r"[a-zà-ỹ]{4,}",source_text.lower()))
         lesson_words=set(re.findall(r"[a-zà-ỹ]{4,}"," ".join([lesson.get("title","")]+[s.get("title","")+" "+" ".join(s.get("bullets",[])) for s in slides]).lower()))
@@ -239,4 +250,4 @@ def audit_lesson(lesson: dict, requested_slides: int, source_text: str = "") -> 
     review_rows=sum(r["status"]=="REVIEW" for r in rows)
     status="FAIL" if any(i["severity"]=="FAIL" for i in issues) else "REVIEW" if issues or review_rows else "PASS"
     score=max(0,100-12*sum(i["severity"]=="FAIL" for i in issues)-5*sum(i["severity"]=="REVIEW" for i in issues)-2*review_rows)
-    return {"version":"7.1.0","status":status,"score":score,"summary":{"slides":len(slides),"activities":dict(activities),"layouts":dict(layouts),"slides_to_review":review_rows},"issues":issues,"slides":rows}
+    return {"version":"8.3.0","status":status,"score":score,"summary":{"slides":len(slides),"activities":dict(activities),"layouts":dict(layouts),"slides_to_review":review_rows},"issues":issues,"slides":rows}
