@@ -1,6 +1,15 @@
-LESSON STUDIO V8.1 — 10-SLIDE BUILDER, CONTINUITY LOCK
+LESSON STUDIO V8.2 — MULTI-SOURCE & CHECKPOINT REVIEW
 
-NÂNG CẤP V8.1
+NÂNG CẤP V8.2
+1. Cho phép chọn đồng thời tối đa 8 tệp nguồn PDF, DOCX, TXT hoặc JSON; tổng dung lượng tối đa 50 MB.
+2. Tài liệu văn bản được ghép có nhãn tên nguồn; mỗi PDF được gửi như một phần nguồn riêng.
+3. Danh mục nguồn được chuyển cho AI theo đúng thứ tự và source_ref phải ghi tên tệp thực tế đã sử dụng.
+4. Sau mỗi chặng, dựng ngay PowerPoint xem trước từ slide 1 đến slide hiện tại.
+5. Cho tải thêm JSON checkpoint để bảo toàn cấu trúc đã tạo.
+6. Nút tạo chặng tiếp theo bị khóa cho đến khi giáo viên xác nhận đã xem và duyệt chặng hiện tại.
+7. Giáo viên có thể dừng ngay khi phát hiện sai, không phải chờ toàn bộ bài hoàn thành.
+
+NỀN TẢNG V8.1
 1. Không còn buộc AI tạo toàn bộ 40–50 slide trong một lượt.
 2. Lần đầu lập bản đồ slide_plan cho toàn bài và chỉ tạo tối đa 10 slide đầu.
 3. Hiển thị nút tiếp nối theo đúng phạm vi: 1–10, 11–20, 21–30, 31–40; chặng cuối tự rút gọn nếu tổng không chia hết cho 10.

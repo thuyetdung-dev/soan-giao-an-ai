@@ -3,7 +3,7 @@ import unittest
 import sympy as sp
 
 from ai_resilience import AIQuotaUnavailable, classify_ai_error, generate_with_fallback, order_models
-from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan
+from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan, validate_source_batch
 from adaptive_engine import variant_consistency
 from curriculum_engine import audit_curriculum, normalize_profile, normalize_storyboard, repair_quality_key, structural_defects
 from lesson_engine import audit_lesson, safe_autofix_lesson, verify_variation_table
@@ -159,6 +159,13 @@ class ChunkBuilderTests(unittest.TestCase):
         self.assertTrue(validate_plan(plan,20))
         plan[-1]["title"]="Slide 1"
         self.assertFalse(validate_plan(plan,20))
+
+    def test_multiple_sources_are_accepted(self):
+        class Upload:
+            def __init__(self,size): self.data=b"x"*size
+            def getvalue(self): return self.data
+        self.assertTrue(validate_source_batch([Upload(10),Upload(20),Upload(30)])[0])
+        self.assertFalse(validate_source_batch([Upload(1)]*9)[0])
 
 if __name__ == "__main__":
     unittest.main()

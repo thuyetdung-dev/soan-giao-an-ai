@@ -1,7 +1,7 @@
-LESSON STUDIO V8.1 — TEST REPORT
+LESSON STUDIO V8.2 — TEST REPORT
 
 Ngày kiểm tra: 2026-09-08
-Kết quả: 24/24 PASSED
+Kết quả: 25/25 PASSED
 
 PASSED — Hai đề khác nhau tạo fingerprint khác nhau.
 PASSED — answer_index và check.correct_index đồng bộ sau khi đảo phương án.
@@ -27,6 +27,7 @@ PASSED — Nhật ký liên tục lưu được kiến thức và công thức c
 PASSED — Phát hiện và từ chối slide trùng lặp.
 PASSED — Chấp nhận slide mới có nội dung khác biệt.
 PASSED — Bản đồ toàn bài phải đủ số thứ tự liên tục và không trùng tiêu đề.
+PASSED — Chấp nhận nhiều tệp nguồn trong giới hạn và từ chối khi vượt số lượng cho phép.
 
 Lệnh tái kiểm tra:
 python -m unittest discover -s tests -v

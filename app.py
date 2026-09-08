@@ -29,13 +29,15 @@ from v5_engine import build_variants, coverage_report, release_gate, manifest as
 from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table, safe_autofix_lesson
 from curriculum_engine import audit_curriculum, repair_quality_key, structural_defects
 from ai_resilience import AIQuotaUnavailable, generate_with_fallback
-from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan
+from chunk_engine import batch_range, compact_digest, merge_unique, validate_plan, validate_source_batch
 from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.1.0 CTGDPT 2018 + 10-Slide Builder"
+APP_VERSION = "8.2.0 Multi-Source + Checkpoint Review"
 MAX_UPLOAD_MB = 20
+MAX_TOTAL_UPLOAD_MB = 50
+MAX_SOURCE_FILES = 8
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
 
@@ -131,6 +133,21 @@ def read_source(uploaded_file) -> tuple[str, bytes, str]:
             raise ValueError("Tệp JSON không hợp lệ.") from exc
         return json.dumps(parsed, ensure_ascii=False)[:MAX_SOURCE_CHARS], data, "json"
     raise ValueError("Chỉ hỗ trợ PDF, DOCX, TXT và JSON.")
+
+def read_sources(uploaded_files) -> tuple[str,list[dict],list[dict]]:
+    files=list(uploaded_files or [])
+    valid,message=validate_source_batch(files,MAX_SOURCE_FILES,MAX_TOTAL_UPLOAD_MB*1024*1024)
+    if not valid: raise ValueError(message)
+    text_parts=[]; binary_parts=[]; manifest=[]
+    for index,file in enumerate(files,1):
+        text,data,kind=read_source(file)
+        manifest.append({"order":index,"name":file.name,"type":kind,"bytes":len(data)})
+        if kind=="pdf": binary_parts.append({"mime_type":"application/pdf","data":data})
+        elif text: text_parts.append(f"[NGUỒN {index}: {file.name}]\n{text}")
+    combined="\n\n".join(text_parts)
+    if len(combined)>MAX_SOURCE_CHARS:
+        combined=combined[:MAX_SOURCE_CHARS]+"\n[ĐÃ GIỚI HẠN PHẦN VĂN BẢN TỔNG HỢP]"
+    return combined,binary_parts,manifest
 
 ALLOWED_FUNCTIONS = {
     "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt,
@@ -429,7 +446,7 @@ JSON HIỆN CÓ:
     return repaired
 
 
-def generate_lesson_chunk(model_name: str, available_models: list[str], source_text: str, source_bytes: bytes, source_type: str, config: LessonConfig, existing: dict | None=None, notify=None) -> dict[str,Any]:
+def generate_lesson_chunk(model_name: str, available_models: list[str], source_text: str, source_parts: list[dict], source_manifest: list[dict], config: LessonConfig, existing: dict | None=None, notify=None) -> dict[str,Any]:
     completed=len((existing or {}).get("slides",[])); start,end=batch_range(completed,config.slide_count,10); count=end-start+1
     if completed==0:
         prompt=build_prompt(config)+f"""
@@ -449,7 +466,9 @@ Giữ đúng chủ đề: {existing.get('title') or config.lesson}. Chỉ dùng 
 Mỗi slide có đủ: title, subtitle, activity, layout, bullets, formulas, question, product, answer, teacher_note, source_ref, graph, variation_table.
 Tiếp nối logic từ slide {completed}; mỗi slide đưa bài học tiến thêm một bước. Chỉ nhắc lại tối đa một câu ngắn khi thật sự cần chuyển ý.
 """
-    contents=[{"mime_type":"application/pdf","data":source_bytes},prompt] if source_type=="pdf" else [f"TÀI LIỆU NGUỒN:\n{source_text}\n\n{prompt}"]
+    source_header="DANH MỤC NGUỒN THEO THỨ TỰ ƯU TIÊN (source_ref phải ghi đúng tên tệp đã dùng):\n"+json.dumps(source_manifest,ensure_ascii=False)
+    textual=f"{source_header}\n\nTÀI LIỆU DẠNG VĂN BẢN:\n{source_text}\n\n{prompt}"
+    contents=[*source_parts,textual]
     def factory(name): return genai.GenerativeModel(name,generation_config={"response_mime_type":"application/json","temperature":0.18})
     response,meta=generate_with_fallback(model_name,available_models,contents,factory,notify=notify)
     raw=re.sub(r'```(?:json)?|```','',response.text or '').strip(); match=re.search(r'\{.*\}',raw,re.DOTALL)
@@ -854,7 +873,8 @@ with st.sidebar:
         selected_model = "models/gemini-1.5-flash"
 
 st.subheader("1. Tải tài liệu nguồn")
-uploaded = st.file_uploader("PDF, Word, TXT hoặc JSON (tối đa 20 MB)", type=["pdf", "docx", "txt", "json"])
+is_lesson_mode=mode=="Tạo bài giảng PowerPoint"
+uploaded = st.file_uploader("PDF, Word, TXT hoặc JSON (tối đa 8 tệp, tổng 50 MB)" if is_lesson_mode else "PDF, Word, TXT hoặc JSON (tối đa 20 MB)", type=["pdf", "docx", "txt", "json"],accept_multiple_files=is_lesson_mode)
 st.markdown('<div class="small-note">Nên dùng tài liệu chính thống: SGK, SGV, kế hoạch bài dạy hoặc chuyên đề đã kiểm duyệt.</div>', unsafe_allow_html=True)
 
 if mode == "🧬 Exam Intelligence V5.0":
@@ -1057,18 +1077,27 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Lesson Studio V8.1 — Xây bài giảng theo từng chặng 10 slide")
+st.subheader("2. Lesson Studio V8.2 — Nhiều nguồn & duyệt từng chặng")
 st.caption("Lập bản đồ toàn bài → tạo từng chặng tối đa 10 slide → chống lặp → ghép → kiểm định → xuất PowerPoint.")
 batch_state=st.session_state.get("lesson_batch_v81")
 if batch_state:
     completed=len(batch_state["lesson"].get("slides",[])); target=batch_state["config"].slide_count
     st.progress(min(1.0,completed/max(1,target)),text=f"Đã hoàn thành {completed}/{target} slide")
+    st.caption("Cô hãy tải bản chặng hiện tại về đọc. Chỉ xác nhận khi nội dung, công thức và tiến trình đã phù hợp.")
+    partial_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",batch_state["lesson"].get("title") or "Bai_giang_Toan").strip("_")
+    try:
+        partial_pptx=build_pptx(batch_state["lesson"],batch_state["config"])
+        dl1,dl2=st.columns(2)
+        dl1.download_button(f"📥 TẢI POWERPOINT XEM TRƯỚC — SLIDE 1–{completed}",partial_pptx,f"{partial_name[:60]}_XemTruoc_1-{completed}.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True)
+        dl2.download_button("📋 TẢI JSON CHẶNG HIỆN TẠI",json.dumps(batch_state["lesson"],ensure_ascii=False,indent=2),f"{partial_name[:60]}_Checkpoint_{completed}.json","application/json",use_container_width=True)
+    except Exception as preview_exc: st.warning(f"Chưa dựng được bản xem trước: {preview_exc}")
+    approved_chunk=st.checkbox(f"Tôi đã xem và duyệt nội dung slide 1–{completed}",key=f"approve_chunk_v82_{completed}")
     if completed<target:
         start,end=batch_range(completed,target,10)
-        if st.button(f"▶️ TẠO SLIDE {start}–{end}",type="primary",use_container_width=True):
+        if st.button(f"▶️ TIẾP TỤC TẠO SLIDE {start}–{end}",type="primary",use_container_width=True,disabled=not approved_chunk):
             try:
                 with st.status(f"Đang tạo chặng slide {start}–{end}…",expanded=True) as status:
-                    updated=generate_lesson_chunk(selected_model,available_models,batch_state["source_text"],batch_state["source_bytes"],batch_state["source_type"],batch_state["config"],batch_state["lesson"],notify=st.write)
+                    updated=generate_lesson_chunk(selected_model,available_models,batch_state["source_text"],batch_state["source_parts"],batch_state["source_manifest"],batch_state["config"],batch_state["lesson"],notify=st.write)
                     batch_state["lesson"]=updated; st.session_state["lesson_batch_v81"]=batch_state
                     completed=len(updated["slides"])
                     if completed>=target:
@@ -1091,10 +1120,10 @@ else:
     if st.button("🚀 TẠO 10 SLIDE ĐẦU",type="primary",use_container_width=True,disabled=uploaded is None):
         try:
             config=LessonConfig(teacher,school,grade,book,lesson,int(periods),student_level,int(slide_count),theme_name,include_answers,include_notes)
-            source_text,source_bytes,source_type=read_source(uploaded)
+            source_text,source_parts,source_manifest=read_sources(uploaded)
             with st.status("Đang lập bản đồ toàn bài và tạo chặng đầu…",expanded=True) as status:
-                first=generate_lesson_chunk(selected_model,available_models,source_text,source_bytes,source_type,config,None,notify=st.write)
-                state={"config":config,"source_text":source_text,"source_bytes":source_bytes,"source_type":source_type,"lesson":first}
+                first=generate_lesson_chunk(selected_model,available_models,source_text,source_parts,source_manifest,config,None,notify=st.write)
+                state={"config":config,"source_text":source_text,"source_parts":source_parts,"source_manifest":source_manifest,"lesson":first}
                 st.session_state["lesson_batch_v81"]=state
                 if len(first["slides"])>=config.slide_count:
                     st.session_state["lesson_data_v6"]=first; st.session_state["lesson_config_v6"]=config; st.session_state["lesson_source_v6"]=source_text
@@ -1174,9 +1203,9 @@ if lesson_data and config and report:
     try:
         pptx_bytes=build_pptx(lesson_data,config)
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename=f"{safe_name[:70]}_LessonStudioV8_1_10SlideBuilder.pptx"
+        filename=f"{safe_name[:70]}_LessonStudioV8_2_MultiSource_Checkpoints.pptx"
         export_locked=combined_fail or not st.session_state.get("storyboard_approved_v8",False)
-        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.1",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
+        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.2",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
         if combined_fail: st.error("Đã khóa xuất vì còn lỗi nghiêm trọng trong bài giảng hoặc storyboard.")
         elif not st.session_state.get("storyboard_approved_v8",False): st.warning("Hãy duyệt Hồ sơ bài học và Storyboard để mở khóa PowerPoint.")
         qa_payload={"lesson_qa":report,"curriculum_qa":curriculum_report}

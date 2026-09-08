@@ -31,3 +31,11 @@ def validate_plan(plan: Any,target: int) -> bool:
     numbers=[x.get("number") for x in plan if isinstance(x,dict)]
     titles=[str(x.get("title","")).strip().lower() for x in plan if isinstance(x,dict)]
     return numbers==list(range(1,int(target)+1)) and len(titles)==int(target) and all(titles) and len(set(titles))==len(titles)
+
+def validate_source_batch(files: Any,max_files: int=8,max_total_bytes: int=50*1024*1024) -> tuple[bool,str]:
+    items=list(files or [])
+    if not items: return False,"Cần tải lên ít nhất một tài liệu nguồn."
+    if len(items)>max_files: return False,f"Chỉ tải tối đa {max_files} tệp trong một bài giảng."
+    total=sum(len(item.getvalue()) for item in items)
+    if total>max_total_bytes: return False,"Tổng dung lượng các tệp vượt quá giới hạn."
+    return True,""
