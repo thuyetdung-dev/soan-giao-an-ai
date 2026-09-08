@@ -98,4 +98,25 @@ def audit_curriculum(profile: dict, storyboard: list[dict], periods: int, slide_
     if slide_count and not used_refs: add("REVIEW","SLIDE_LINKAGE","Storyboard chưa liên kết với các slide.")
     status="FAIL" if any(x["severity"]=="FAIL" for x in issues) else "REVIEW" if issues else "PASS"
     score=max(0,100-12*sum(x["severity"]=="FAIL" for x in issues)-4*sum(x["severity"]=="REVIEW" for x in issues))
-    return {"version":"8.0.0","status":status,"score":score,"target_minutes":target,"total_minutes":total,"phase_counts":dict(phases),"issues":issues}
+    return {"version":"8.0.2","status":status,"score":score,"target_minutes":target,"total_minutes":total,"phase_counts":dict(phases),"issues":issues}
+
+
+def structural_defects(lesson_report: dict, curriculum_report: dict, expected_slides: int) -> list[str]:
+    """Return repairable generation defects; mathematical content is never auto-invented here."""
+    defects=[]
+    actual=int(lesson_report.get("summary",{}).get("slides",0))
+    if abs(actual-int(expected_slides))>2:
+        defects.append(f"Số slide hiện có {actual}; yêu cầu {expected_slides} (chấp nhận sai lệch tối đa 2).")
+    lesson_codes={x.get("code") for x in lesson_report.get("issues",[])}
+    curriculum_codes={x.get("code") for x in curriculum_report.get("issues",[])}
+    if "MISSING_ACTIVITY" in lesson_codes or "STORYBOARD_PHASE" in curriculum_codes:
+        defects.append("Thiếu một hoặc nhiều pha bắt buộc: KHỞI ĐỘNG, HÌNH THÀNH KIẾN THỨC, LUYỆN TẬP, VẬN DỤNG, CỦNG CỐ.")
+    return defects
+
+
+def repair_quality_key(lesson_report: dict, curriculum_report: dict, expected_slides: int) -> tuple[int,int,int]:
+    issues=list(lesson_report.get("issues",[]))+list(curriculum_report.get("issues",[]))
+    fails=sum(x.get("severity")=="FAIL" for x in issues)
+    reviews=sum(x.get("severity")=="REVIEW" for x in issues)
+    actual=int(lesson_report.get("summary",{}).get("slides",0))
+    return fails,abs(actual-int(expected_slides)),reviews

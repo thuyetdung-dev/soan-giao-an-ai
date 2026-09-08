@@ -1,7 +1,7 @@
-LESSON STUDIO V8.0.1 — TEST REPORT
+LESSON STUDIO V8.0.2 — TEST REPORT
 
 Ngày kiểm tra: 2026-09-08
-Kết quả: 16/16 PASSED
+Kết quả: 19/19 PASSED
 
 PASSED — Hai đề khác nhau tạo fingerprint khác nhau.
 PASSED — answer_index và check.correct_index đồng bộ sau khi đảo phương án.
@@ -19,6 +19,9 @@ PASSED — Storyboard tham chiếu slide không tồn tại bị chặn.
 PASSED — Nhận diện đúng lỗi 429/quota.
 PASSED — Tự chuyển từ mô hình hết hạn mức ngày sang mô hình dự phòng.
 PASSED — Luôn ưu tiên mô hình do giáo viên lựa chọn trước các mô hình dự phòng.
+PASSED — Phát hiện đồng thời bài thiếu nhiều slide và thiếu pha hoạt động.
+PASSED — Chấp nhận sai lệch tối đa 2 slide khi đã đủ 5 pha.
+PASSED — Chỉ ưu tiên bản sửa có ít lỗi FAIL hơn, kể cả khi số slide lệch nhẹ.
 
 Lệnh tái kiểm tra:
 python -m unittest discover -s tests -v

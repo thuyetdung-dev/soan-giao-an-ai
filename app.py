@@ -27,13 +27,13 @@ from exam_factory import exam_generation_prompt, reviewer_prompt, parse_ai_json,
 from question_bank import QuestionBank, question_dna, fingerprint as question_fingerprint, select_from_bank
 from v5_engine import build_variants, coverage_report, release_gate, manifest as build_v5_manifest
 from lesson_engine import normalize_lesson, audit_lesson, verify_variation_table, safe_autofix_lesson
-from curriculum_engine import audit_curriculum
+from curriculum_engine import audit_curriculum, repair_quality_key, structural_defects
 from ai_resilience import AIQuotaUnavailable, generate_with_fallback
 from equation_engine import add_native_equation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-APP_VERSION = "8.0.1 CTGDPT 2018 + AI Fallback"
+APP_VERSION = "8.0.2 CTGDPT 2018 + Structural Repair"
 MAX_UPLOAD_MB = 20
 MAX_SOURCE_CHARS = 60_000
 MAX_SLIDES = 60
@@ -392,6 +392,40 @@ def generate_lesson(model_name: str, available_models: list[str], source_text: s
         return result
     except Exception:
         raise ValueError("AI trả về JSON không hợp lệ. Vui lòng tạo lại; hệ thống không tự biến đổi công thức để tránh làm sai nội dung.")
+
+
+def repair_lesson_structure(model_name: str, available_models: list[str], lesson: dict, defects: list[str], source_text: str, source_bytes: bytes, source_type: str, config: LessonConfig, notify=None) -> dict[str,Any]:
+    repair_prompt=f"""
+Bạn là biên tập viên bài giảng Toán THPT CTGDPT 2018. Hãy hoàn thiện JSON bài giảng dưới đây, không viết lời giải thích ngoài JSON.
+
+LỖI CẦN SỬA:
+{chr(10).join('- '+x for x in defects)}
+
+RÀNG BUỘC TUYỆT ĐỐI:
+- Giữ đúng tên bài, phạm vi và kiến thức Toán học từ tài liệu nguồn/JSON hiện có; không bịa kiến thức, định lý, số liệu hoặc nguồn.
+- Tạo từ {max(1,config.slide_count-2)} đến {min(MAX_SLIDES,config.slide_count+2)} slide nội dung; ưu tiên đúng {config.slide_count} slide.
+- slides và storyboard đều phải có đủ 5 pha: KHỞI ĐỘNG, HÌNH THÀNH KIẾN THỨC, LUYỆN TẬP, VẬN DỤNG, CỦNG CỐ.
+- Tổng minutes của storyboard phải bằng đúng {config.periods*45} phút.
+- Hoạt động VẬN DỤNG phải dùng kiến thức đã có để giải quyết một nhiệm vụ phù hợp, có sản phẩm và tiêu chí đánh giá; không tự thêm kiến thức mới.
+- Mỗi slide tối đa 5–6 dòng; không sao chép lặp để đủ số lượng.
+- Giữ nguyên đầy đủ các khóa lesson_profile, storyboard và slides theo cấu trúc JSON đầu vào.
+
+JSON HIỆN CÓ:
+{json.dumps(lesson,ensure_ascii=False)}
+"""
+    if source_type=="pdf":
+        contents=[{"mime_type":"application/pdf","data":source_bytes},repair_prompt]
+    else:
+        contents=[f"TÀI LIỆU NGUỒN:\n{source_text}\n\n{repair_prompt}"]
+    def model_factory(name):
+        return genai.GenerativeModel(name,generation_config={"response_mime_type":"application/json","temperature":0.15})
+    response,meta=generate_with_fallback(model_name,available_models,contents,model_factory,notify=notify)
+    raw=re.sub(r'```(?:json)?|```','',response.text or '').strip()
+    match=re.search(r'\{.*\}',raw,re.DOTALL)
+    if not match: raise ValueError("Lượt hoàn thiện không trả về JSON hợp lệ.")
+    repaired=validate_lesson(json.loads(match.group(0),strict=False))
+    repaired["_generation_meta"]={**lesson.get("_generation_meta",{}),"structural_repair":meta}
+    return repaired
 
 def add_full_background(slide, color: tuple[int, int, int]) -> None:
     fill = slide.background.fill
@@ -981,7 +1015,7 @@ if mode in {"Thẩm định đề Toán Pro", "Thẩm định đề Toán 360°"
         st.download_button("📥 Tải báo cáo thẩm định 360° JSON",json.dumps(payload,ensure_ascii=False,indent=2),"bao_cao_tham_dinh_360_v5_0.json","application/json",use_container_width=True)
     st.stop()
 
-st.subheader("2. Lesson Studio V8.0 — Hồ sơ bài học & Storyboard CTGDPT 2018")
+st.subheader("2. Lesson Studio V8.0.2 — Tự hoàn thiện cấu trúc CTGDPT 2018")
 st.caption("Tạo cấu trúc → kiểm định → xem trước/chỉnh sửa → xuất PowerPoint.")
 if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_container_width=True, disabled=uploaded is None):
     try:
@@ -999,6 +1033,20 @@ if st.button("🚀 TẠO CẤU TRÚC BÀI GIẢNG", type="primary", use_containe
             st.write("Đang kiểm định tiến trình, mật độ chữ và độ đa dạng bố cục…")
             lesson_report=audit_lesson(lesson_data,int(slide_count),source_text)
             curriculum_report=audit_curriculum(lesson_data.get("lesson_profile",{}),lesson_data.get("storyboard",[]),int(periods),len(lesson_data.get("slides",[])))
+            defects=structural_defects(lesson_report,curriculum_report,int(slide_count))
+            if defects:
+                st.write("Phát hiện cấu trúc chưa đủ; đang hoàn thiện riêng số slide và 5 pha hoạt động…")
+                try:
+                    repaired=repair_lesson_structure(selected_model,available_models,lesson_data,defects,source_text,source_bytes,source_type,config,notify=st.write)
+                    repaired_report=audit_lesson(repaired,int(slide_count),source_text)
+                    repaired_curriculum=audit_curriculum(repaired.get("lesson_profile",{}),repaired.get("storyboard",[]),int(periods),len(repaired.get("slides",[])))
+                    if repair_quality_key(repaired_report,repaired_curriculum,int(slide_count)) < repair_quality_key(lesson_report,curriculum_report,int(slide_count)):
+                        lesson_data,lesson_report,curriculum_report=repaired,repaired_report,repaired_curriculum
+                        st.success("Đã hoàn thiện cấu trúc và kiểm định lần hai.")
+                    else:
+                        st.warning("Lượt hoàn thiện không tốt hơn bản đầu; hệ thống giữ lại bản đầu để cô duyệt.")
+                except (AIQuotaUnavailable,ValueError) as repair_exc:
+                    st.warning(f"Chưa thể chạy lượt hoàn thiện: {repair_exc} Bản đầu vẫn được giữ nguyên.")
             st.session_state["lesson_data_v6"]=lesson_data
             st.session_state["lesson_config_v6"]=config
             st.session_state["lesson_source_v6"]=source_text
@@ -1085,9 +1133,9 @@ if lesson_data and config and report:
     try:
         pptx_bytes=build_pptx(lesson_data,config)
         safe_name=re.sub(r"[^0-9A-Za-zÀ-ỹ_-]+","_",lesson_data.get("title") or "Bai_giang_Toan").strip("_")
-        filename=f"{safe_name[:70]}_LessonStudioV8_CTGDPT2018.pptx"
+        filename=f"{safe_name[:70]}_LessonStudioV8_0_2_CTGDPT2018.pptx"
         export_locked=combined_fail or not st.session_state.get("storyboard_approved_v8",False)
-        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.0",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
+        st.download_button("📥 TẢI POWERPOINT LESSON STUDIO V8.0.2",pptx_bytes,filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True,disabled=export_locked)
         if combined_fail: st.error("Đã khóa xuất vì còn lỗi nghiêm trọng trong bài giảng hoặc storyboard.")
         elif not st.session_state.get("storyboard_approved_v8",False): st.warning("Hãy duyệt Hồ sơ bài học và Storyboard để mở khóa PowerPoint.")
         qa_payload={"lesson_qa":report,"curriculum_qa":curriculum_report}

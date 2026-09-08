@@ -4,7 +4,7 @@ import sympy as sp
 
 from ai_resilience import AIQuotaUnavailable, classify_ai_error, generate_with_fallback, order_models
 from adaptive_engine import variant_consistency
-from curriculum_engine import audit_curriculum, normalize_profile, normalize_storyboard
+from curriculum_engine import audit_curriculum, normalize_profile, normalize_storyboard, repair_quality_key, structural_defects
 from lesson_engine import audit_lesson, safe_autofix_lesson, verify_variation_table
 from safe_math_parser import SafeMathError, parse_math_expression
 from v5_engine import build_variants, exam_fingerprint
@@ -111,6 +111,23 @@ class AIResilienceTests(unittest.TestCase):
     def test_keeps_selected_model_first(self):
         ordered=order_models("models/gemini-selected",["models/gemini-flash-lite","models/gemini-selected"])
         self.assertEqual(ordered[0],"models/gemini-selected")
+
+
+class StructuralRepairTests(unittest.TestCase):
+    def test_detects_missing_phase_and_short_deck(self):
+        lesson_report={"summary":{"slides":9},"issues":[{"code":"MISSING_ACTIVITY","severity":"FAIL"}]}
+        curriculum_report={"issues":[{"code":"STORYBOARD_PHASE","severity":"FAIL"}]}
+        defects=structural_defects(lesson_report,curriculum_report,20)
+        self.assertEqual(len(defects),2)
+
+    def test_accepts_slide_tolerance_and_all_phases(self):
+        lesson_report={"summary":{"slides":19},"issues":[]}; curriculum_report={"issues":[]}
+        self.assertEqual(structural_defects(lesson_report,curriculum_report,20),[])
+
+    def test_quality_prefers_fewer_failures(self):
+        bad=({"summary":{"slides":20},"issues":[{"severity":"FAIL"}]},{"issues":[]})
+        good=({"summary":{"slides":18},"issues":[]},{"issues":[]})
+        self.assertLess(repair_quality_key(*good,20),repair_quality_key(*bad,20))
 
 if __name__ == "__main__":
     unittest.main()

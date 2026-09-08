@@ -1,6 +1,14 @@
-LESSON STUDIO V8.0.1 — HỒ SƠ BÀI HỌC, STORYBOARD & AI FALLBACK
+LESSON STUDIO V8.0.2 — TỰ HOÀN THIỆN CẤU TRÚC CTGDPT 2018
 
-SỬA LỖI HẠN MỨC API Ở V8.0.1
+NÂNG CẤP V8.0.2
+1. Kiểm định ngay sau lượt sinh đầu để phát hiện thiếu slide và thiếu một trong 5 pha hoạt động.
+2. Nếu lệch quá 2 slide hoặc thiếu pha, chạy tối đa một lượt hoàn thiện cấu trúc có khóa nguồn.
+3. Lượt hoàn thiện phải giữ đúng bài học, không thêm kiến thức mới, đủ 5 pha và đúng tổng thời gian 45 phút/tiết.
+4. Chỉ nhận bản hoàn thiện nếu kết quả QA tốt hơn bản đầu theo thứ tự: ít lỗi FAIL hơn, gần số slide yêu cầu hơn, ít cảnh báo REVIEW hơn.
+5. Nếu lượt hoàn thiện hết quota hoặc JSON lỗi, giữ nguyên bản đầu; không làm mất kết quả đã tạo.
+6. Không sao chép lặp nội dung chỉ để đủ số slide.
+
+NỀN TẢNG AI FALLBACK V8.0.1
 1. Nhận diện riêng lỗi 429/quota, lỗi máy chủ tạm thời và lỗi API Key/quyền truy cập.
 2. Nếu hạn mức theo ngày của mô hình đang chọn đã hết, tự chuyển sang mô hình Gemini dự phòng đang có trong tài khoản.
 3. Nếu lỗi tạm thời có retry_delay, chỉ chờ và thử lại một lần theo thời gian Google chỉ định (tối đa 35 giây), tránh vòng lặp vô hạn.
